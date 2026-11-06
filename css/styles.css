@@ -386,6 +386,13 @@ body.focus-mode .ui-panel {
   max-width: 92vw;
 }
 
+/* Com o painel Project aberto, a barra centraliza no espaço livre à direita dele
+   (senão o começo da barra — 📁 / ▣ Agrupar — fica escondido atrás do painel) */
+body.pp-open #context-bar {
+  left: calc(50% + (72px + var(--pp-width)) / 2);
+  max-width: calc(100vw - 72px - var(--pp-width) - 24px);
+}
+
 .ctx-group {
   display: flex;
   align-items: center;
@@ -1931,6 +1938,11 @@ body.saving-disk #save-indicator {
 @media (max-width: 760px) {
   #project-panel {
     width: min(var(--pp-width), calc(100vw - 90px));
+  }
+  /* Tela estreita: o painel cobre quase tudo; a barra volta a ficar centralizada */
+  body.pp-open #context-bar {
+    left: 50%;
+    max-width: 92vw;
   }
 }
 
