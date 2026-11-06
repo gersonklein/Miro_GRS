@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Miro_GRS — Studio Visual, PureRef & Audio Canvas</title>
+  <link rel="stylesheet" href="css/styles.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%236366f1'/><path d='M25 70 L42 30 L58 60 L75 30' stroke='white' stroke-width='10' fill='none' stroke-linecap='round' stroke-linejoin='round'/><circle cx='75' cy='70' r='8' fill='%2322d3ee'/></svg>" />
+</head>
+<body>
+  <!-- TOP HEADER BAR -->
+  <header id="top-bar" class="ui-panel">
+    <div class="top-left">
+      <div class="brand" title="Miro_GRS — Miro + PureRef + Audio Studio">
+        <div class="brand-icon">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2">
+            <rect x="3" y="3" width="18" height="18" rx="4" stroke="#818cf8"/>
+            <path d="M7 15l3-6 4 5 3-4" stroke="#38bdf8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <span class="brand-title">Miro_GRS</span>
+      </div>
+
+      <div class="divider-v"></div>
+
+      <button id="btn-projects" class="icon-btn" title="Projetos (abrir, criar, trocar)">
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+      </button>
+      <input type="text" id="board-title" class="board-title-input" value="Meu Quadro Criativo" title="Nome do projeto (clique para renomear)" />
+      <button id="btn-save-project" class="icon-btn save-btn" title="Salvar Project em uma pasta do computador (Ctrl+S)">
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+        <span id="save-indicator" title="Tudo salvo"></span>
+      </button>
+      <span id="linked-folder-label" class="linked-folder-label"></span>
+
+      <div class="divider-v"></div>
+
+      <button id="btn-undo" class="icon-btn" title="Desfazer (Ctrl+Z)">
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>
+      </button>
+      <button id="btn-redo" class="icon-btn" title="Refazer (Ctrl+Y)">
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 7v6h-6"/><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7"/></svg>
+      </button>
+    </div>
+
+    <!-- PUREREF & ORGANIZATION BAR (CENTER) -->
+    <div class="top-center">
+      <div class="tool-group-label">PureRef Layout:</div>
+      <button id="btn-pack" class="action-chip" title="Empacotar imagens selecionadas sem sobreposição (Ctrl+P)">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+        <span>Auto-Pack</span>
+      </button>
+      <button id="btn-grid-layout" class="action-chip" title="Organizar selecionados em Grade (Grid)">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        <span>Grid</span>
+      </button>
+      <button id="btn-norm-height" class="action-chip" title="Igualar Altura das imagens selecionadas mantendo proporção">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16M4 20h16M12 7v10m-3-7 3-3 3 3m-6 4 3 3 3-3"/></svg>
+        <span>Igualar Altura</span>
+      </button>
+      <button id="btn-align-row" class="action-chip" title="Alinhar selecionados em linha horizontal">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18"/><rect x="5" y="7" width="4" height="10" rx="1"/><rect x="15" y="5" width="4" height="14" rx="1"/></svg>
+        <span>Alinhar</span>
+      </button>
+
+      <div class="divider-v"></div>
+
+      <button id="btn-record-mic" class="action-chip chip-danger" title="Gravar som do microfone direto para o Canvas">
+        <span class="rec-dot"></span>
+        <span>Gravar Áudio</span>
+      </button>
+      <button id="btn-synth-sound" class="action-chip chip-audio" title="Gerar som de exemplo com Waveform no canvas">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h2l3-7 4 14 4-10 3 6h4"/></svg>
+        <span>+ Som Demo</span>
+      </button>
+    </div>
+
+    <!-- RIGHT ACTIONS: PALETTE, FOCUS, EXPORT/IMPORT -->
+    <div class="top-right">
+      <button id="btn-toggle-palette" class="icon-btn" title="Abrir/Fechar Paleta de Cores & Conta-Gotas">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg>
+      </button>
+
+      <button id="btn-focus-mode" class="icon-btn" title="Modo Foco PureRef — Ocultar UI (Tecla Tab)">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+      </button>
+
+      <button id="btn-theme-toggle" class="icon-btn" title="Alternar Tema Escuro / Claro">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+
+      <div class="divider-v"></div>
+
+      <div class="dropdown">
+        <button id="btn-file-menu" class="primary-btn">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          <span>Salvar / Exportar</span>
+        </button>
+        <div id="file-menu-dropdown" class="dropdown-menu hidden">
+          <button id="menu-projects" class="dropdown-item">
+            <span>🗂 Projetos…</span>
+            <small>Criar, abrir e trocar de projeto</small>
+          </button>
+          <button id="menu-save-disk" class="dropdown-item">
+            <span>💾 Salvar Project na pasta (Ctrl+S)</span>
+            <small>Grupos viram pastas com os arquivos dentro</small>
+          </button>
+          <button id="menu-link-folder" class="dropdown-item">
+            <span>🔗 Escolher / trocar pasta do projeto</span>
+            <small>Onde o projeto é salvo no computador</small>
+          </button>
+          <button id="menu-open-folder" class="dropdown-item">
+            <span>📂 Abrir projeto de uma pasta</span>
+            <small>Também importa pastas e imagens criadas no Explorer</small>
+          </button>
+          <label id="menu-autosave-row" class="dropdown-item dropdown-check">
+            <span><input type="checkbox" id="menu-autosave-disk" /> Auto-salvar na pasta</span>
+            <small>Salva sozinho ~2s depois de cada mudança</small>
+          </label>
+          <button id="menu-export-zip" class="dropdown-item">
+            <span>📦 Exportar ZIP com as pastas</span>
+            <small>Mesma estrutura de pastas, num arquivo só</small>
+          </button>
+          <div class="dropdown-sep"></div>
+          <button id="menu-save-project" class="dropdown-item">
+            <span>💾 Exportar Projeto (.mirogrs)</span>
+            <small>Inclui imagens e sons</small>
+          </button>
+          <button id="menu-load-project" class="dropdown-item">
+            <span>📄 Importar Projeto (.mirogrs / .json)</span>
+            <small>Abre como um projeto novo</small>
+          </button>
+          <button id="menu-export-png" class="dropdown-item">
+            <span>🖼️ Exportar Imagem (PNG)</span>
+            <small>Snapshot visual do canvas</small>
+          </button>
+          <div class="dropdown-sep"></div>
+          <button id="menu-load-demo" class="dropdown-item">
+            <span>✨ Carregar Quadro Demo Completo</span>
+            <small>Exemplos Miro + PureRef + Áudio</small>
+          </button>
+          <button id="menu-clear-board" class="dropdown-item danger-text">
+            <span>🗑️ Limpar Quadro Inteiro</span>
+            <small>Apagar todos os elementos</small>
+          </button>
+        </div>
+      </div>
+
+      <button id="btn-help" class="icon-btn" title="Atalhos de Teclado e Guia de Publicação Online (?)">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- LEFT TOOLBAR (MIRO + PUREREF TOOLS) -->
+  <aside id="left-toolbar" class="ui-panel">
+    <button class="tool-btn active" data-tool="select" title="Selecionar / Mover (V)">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 3 7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="m13 13 6 6"/></svg>
+    </button>
+    <button class="tool-btn" data-tool="pan" title="Mover Canvas / Mão (H ou Espaço)">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0"/><path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2"/><path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>
+    </button>
+
+    <div class="toolbar-sep"></div>
+
+    <button class="tool-btn" data-tool="sticky" title="Adicionar Post-it / Sticky Note (N)">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M15.5 3H5a2 2 0 0 0-2 2v14c0 1.1.9 2 2 2h14a2 2 0 0 0 2-2V8.5L15.5 3Z"/><path d="M15 3v6h6"/></svg>
+    </button>
+    <button class="tool-btn" data-tool="text" title="Adicionar Texto (T)">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>
+    </button>
+
+    <button class="tool-btn" data-tool="textblocks" title="Blocos de Texto (Blockly) — salvos em .txt (B)">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h10v3h3v4H4z"/><path d="M4 13h13v4h-3v3H4z"/><path d="M7 8h4M7 16h6"/></svg>
+    </button>
+
+    <!-- SHAPE POPOVER BUTTON -->
+    <div class="tool-with-sub">
+      <button class="tool-btn" data-tool="shape" title="Adicionar Forma Geométrica (S)">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="16" cy="16" r="5"/></svg>
+      </button>
+      <div id="shape-picker" class="sub-toolbar hidden">
+        <button class="sub-tool-btn active" data-shape="rect" title="Retângulo">▭</button>
+        <button class="sub-tool-btn" data-shape="circle" title="Círculo / Elipse">◯</button>
+        <button class="sub-tool-btn" data-shape="diamond" title="Losango (Decisão)">◇</button>
+        <button class="sub-tool-btn" data-shape="frame" title="Quadro / Frame Agrupador">▣</button>
+      </div>
+    </div>
+
+    <button class="tool-btn" data-tool="connect" title="Conectar Elementos / Setas (L)">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M8.5 8.5c4 0 3 7 7 7"/></svg>
+    </button>
+
+    <div class="toolbar-sep"></div>
+
+    <button class="tool-btn" data-tool="pen" title="Caneta de Desenho Livre (P)">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/></svg>
+    </button>
+    <button class="tool-btn" data-tool="highlighter" title="Marca-Texto (M)">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg>
+    </button>
+    <button class="tool-btn" data-tool="eraser" title="Borracha de Traços e Conexões (E)">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/></svg>
+    </button>
+
+    <div class="toolbar-sep"></div>
+
+    <button class="tool-btn" data-tool="eyedropper" title="Conta-Gotas PureRef — Capturar Cor do Canvas (I)">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="m2 22 1-1h3l9-9"/><path d="M3 21v-3l9-9"/><path d="m15 6 3.4-3.4a2.1 2.1 0 1 1 3 3L18 9l.4.4a2.1 2.1 0 1 1-3 3l-3.8-3.8a2.1 2.1 0 1 1 3-3l.4.4Z"/></svg>
+    </button>
+
+    <button id="btn-upload-media" class="tool-btn highlight-upload" title="Importar Imagens ou Sons do Computador (U)">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+    </button>
+    <button id="btn-add-url" class="tool-btn" title="Importar Imagem/Áudio por URL ou Nota de Código">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+    </button>
+  </aside>
+
+  <!-- PROJECT PANEL (ESTILO UNITY): ÁRVORE DE GRUPOS / PASTAS -->
+  <aside id="project-panel" class="ui-panel">
+    <div class="pp-header">
+      <span class="pp-title">📁 Project</span>
+      <div class="pp-actions">
+        <button id="pp-new-folder" class="icon-btn-sm" title="Nova pasta dentro da selecionada (Ctrl+Alt+N)">＋</button>
+        <button id="pp-isolate" class="icon-btn-sm" title="Mostrar só a pasta selecionada no canvas">◐</button>
+        <button id="pp-collapse-all" class="icon-btn-sm" title="Recolher todas as pastas">⇤</button>
+        <button id="pp-hide" class="icon-btn-sm" title="Esconder painel">«</button>
+      </div>
+    </div>
+    <input id="pp-search" type="text" placeholder="🔍 Buscar pasta…" />
+    <div id="pp-breadcrumb"></div>
+    <div id="pp-tree" tabindex="0"></div>
+    <div class="pp-footer"><span id="pp-stats"></span></div>
+    <div id="pp-resizer" title="Arraste para redimensionar"></div>
+  </aside>
+  <button id="pp-show" class="ui-panel hidden" title="Mostrar painel Project">📁</button>
+
+  <!-- CONTEXTUAL PROPERTIES BAR (FLOATING TOP-CENTER WHEN ITEM OR PEN SELECTED) -->
+  <div id="context-bar" class="ui-panel hidden">
+    <!-- Pasta / Grupo (tag) dos itens selecionados -->
+    <div id="ctx-folder-group" class="ctx-group hidden">
+      <label title="Pasta / Grupo (tag) dos itens selecionados">
+        <span>📁</span>
+        <select id="ctx-folder-select"></select>
+      </label>
+      <button id="ctx-btn-group" class="ctx-btn accent" title="Agrupar seleção em uma nova pasta (Ctrl+G)">▣ Agrupar</button>
+      <button id="ctx-btn-ungroup" class="ctx-btn" title="Desagrupar / tirar do grupo (Ctrl+Shift+G)">⇱</button>
+    </div>
+
+    <!-- Common Color / Stroke Controls -->
+    <div id="ctx-color-group" class="ctx-group">
+      <label title="Cor Principal / Preenchimento">
+        <span>Cor</span>
+        <input type="color" id="ctx-fill-color" value="#fef08a" />
+      </label>
+      <div class="quick-swatches" id="ctx-quick-colors">
+        <button class="swatch" data-color="#fef08a" style="background:#fef08a" title="Amarelo Post-it"></button>
+        <button class="swatch" data-color="#bbf7d0" style="background:#bbf7d0" title="Verde Menta"></button>
+        <button class="swatch" data-color="#bae6fd" style="background:#bae6fd" title="Azul Céu"></button>
+        <button class="swatch" data-color="#fbcfe8" style="background:#fbcfe8" title="Rosa"></button>
+        <button class="swatch" data-color="#ddd6fe" style="background:#ddd6fe" title="Lavanda"></button>
+        <button class="swatch" data-color="#fed7aa" style="background:#fed7aa" title="Laranja"></button>
+        <button class="swatch" data-color="#1e293b" style="background:#1e293b" title="Escuro Slate"></button>
+        <button class="swatch" data-color="#ef4444" style="background:#ef4444" title="Vermelho"></button>
+      </div>
+    </div>
+
+    <div id="ctx-stroke-group" class="ctx-group">
+      <label title="Espessura">
+        <span>Traço</span>
+        <input type="range" id="ctx-stroke-width" min="1" max="24" value="3" />
+      </label>
+    </div>
+
+    <div id="ctx-font-group" class="ctx-group">
+      <label title="Tamanho do Texto">
+        <span>Fonte</span>
+        <select id="ctx-font-size">
+          <option value="14">14px</option>
+          <option value="18" selected>18px</option>
+          <option value="24">24px</option>
+          <option value="32">32px</option>
+          <option value="48">48px</option>
+        </select>
+      </label>
+    </div>
+
+    <!-- PureRef Specific Image Controls -->
+    <div id="ctx-pureref-group" class="ctx-group hidden">
+      <button id="ctx-btn-crop" class="ctx-btn" title="Recortar Imagem / Crop (C)">✂️ Crop</button>
+      <button id="ctx-btn-uncrop" class="ctx-btn" title="Resetar Recorte Original">↺ Reset Crop</button>
+      <button id="ctx-btn-fliph" class="ctx-btn" title="Espelhar Horizontalmente (Alt+H)">↔ Flip H</button>
+      <button id="ctx-btn-flipv" class="ctx-btn" title="Espelhar Verticalmente (Alt+V)">↕ Flip V</button>
+      <button id="ctx-btn-grayscale" class="ctx-btn" title="Alternar Escala de Cinza / Valores (G)">◐ P&B</button>
+    </div>
+
+    <!-- Audio Specific Controls -->
+    <div id="ctx-audio-group" class="ctx-group hidden">
+      <button id="ctx-btn-add-marker" class="ctx-btn accent" title="Adicionar Marcador de Tempo conectável na posição atual do áudio">📍 + Marcador no Tempo</button>
+      <button id="ctx-btn-audio-loop" class="ctx-btn" title="Alternar Loop contínuo do áudio">🔁 Loop</button>
+    </div>
+
+    <!-- Opacity & Layer Actions -->
+    <div id="ctx-common-group" class="ctx-group">
+      <label title="Opacidade do Elemento">
+        <span>Opac.</span>
+        <input type="range" id="ctx-opacity" min="15" max="100" value="100" />
+      </label>
+      <button id="ctx-btn-focus-item" class="ctx-btn" title="Focar Zoom neste item (F)">🔍 Focar</button>
+      <button id="ctx-btn-lock" class="ctx-btn" title="Bloquear/Desbloquear Posição (L)">🔓</button>
+      <button id="ctx-btn-front" class="ctx-btn" title="Trazer para Frente">⬆</button>
+      <button id="ctx-btn-back" class="ctx-btn" title="Enviar para Trás">⬇</button>
+      <button id="ctx-btn-duplicate" class="ctx-btn" title="Duplicar (Ctrl+D)">⧉</button>
+      <button id="ctx-btn-delete" class="ctx-btn danger" title="Excluir Selecionado (Delete)">🗑️</button>
+    </div>
+  </div>
+
+  <!-- FLOATING COLOR PALETTE & EYEDROPPER PANEL -->
+  <div id="palette-panel" class="ui-panel floating-panel hidden">
+    <div class="panel-header">
+      <span>🎨 Paleta PureRef & Conta-Gotas</span>
+      <button id="btn-close-palette" class="close-sm">✕</button>
+    </div>
+    <div class="palette-body">
+      <div class="picked-color-preview">
+        <div id="current-picked-box" class="color-box" style="background: #38bdf8;"></div>
+        <div class="color-info">
+          <input type="text" id="current-picked-hex" value="#38BDF8" readonly title="Clique para copiar HEX" />
+          <small id="current-picked-rgb">rgb(56, 189, 248)</small>
+        </div>
+        <button id="btn-create-swatch-node" class="ctx-btn" title="Criar Card de Cor no Canvas">+ Card</button>
+      </div>
+      <div class="saved-swatches-title">Cores Salvas no Board (Clique p/ usar ou aplicar):</div>
+      <div id="saved-palette-grid" class="palette-grid"></div>
+    </div>
+  </div>
+
+  <!-- FOCUS MODE INDICATOR -->
+  <div id="focus-mode-banner" class="hidden">
+    Modo Foco PureRef Ativo — Pressione <kbd>Tab</kbd> ou <kbd>Esc</kbd> para mostrar os menus
+  </div>
+
+  <!-- EYEDROPPER MAGNIFIER LOUPE -->
+  <div id="eyedropper-loupe" class="hidden">
+    <canvas id="loupe-canvas" width="99" height="99"></canvas>
+    <div id="loupe-hex">#000000</div>
+  </div>
+
+  <!-- MICROPHONE RECORDER OVERLAY -->
+  <div id="mic-recorder-modal" class="ui-panel floating-modal hidden">
+    <div class="mic-header">
+      <span class="rec-dot pulse"></span>
+      <strong>Gravador de Voz / Som ao Vivo</strong>
+    </div>
+    <canvas id="mic-live-canvas" width="280" height="60"></canvas>
+    <div id="mic-timer">00:00.0</div>
+    <div class="mic-actions">
+      <button id="btn-stop-save-mic" class="primary-btn">⏹ Parar e Criar Card no Canvas</button>
+      <button id="btn-cancel-mic" class="ctx-btn danger">Cancelar</button>
+    </div>
+  </div>
+
+  <!-- MAIN INFINITE CANVAS VIEWPORT -->
+  <main id="viewport" tabindex="0">
+    <!-- 1. Dynamic Infinite Grid Background -->
+    <canvas id="grid-canvas"></canvas>
+
+    <!-- 2. World Container (Transformed via Pan & Zoom) -->
+    <div id="world">
+      <!-- Vector Layer for Connections (Cables/Arrows) and Freehand Drawings -->
+      <svg id="svg-layer" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <marker id="arrow-end" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1 L 10 5 L 0 9 z" fill="context-stroke" />
+          </marker>
+          <marker id="dot-start" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="4" markerHeight="4">
+            <circle cx="5" cy="5" r="4" fill="context-stroke" />
+          </marker>
+        </defs>
+        <g id="drawings-group"></g>
+        <g id="connections-group"></g>
+        <path id="temp-connection-path" class="hidden" fill="none" stroke="#38bdf8" stroke-width="2.5" stroke-dasharray="6,4" marker-end="url(#arrow-end)" />
+      </svg>
+
+      <!-- DOM Layer for Interactive Nodes (Images, Audio Players, Sticky Notes, Shapes, Texts) -->
+      <div id="nodes-layer"></div>
+    </div>
+
+    <!-- 3. Selection Marquee Box (Screen Space) -->
+    <div id="selection-box" class="hidden"></div>
+
+    <!-- Drag & Drop Overlay -->
+    <div id="drop-overlay" class="hidden">
+      <div class="drop-box">
+        <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="#38bdf8" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        <h3>Solte Imagens, Vídeos (.mp4, .mov, .webm), Áudios, Textos (.txt) ou Projetos (.mirogrs) aqui!</h3>
+        <p>Eles serão adicionados diretamente na posição do seu cursor no Canvas.</p>
+      </div>
+    </div>
+  </main>
+
+  <!-- Camada (espaço de tela) dos workspaces Blockly dos cards de Blocos de Texto -->
+  <div id="textblocks-layer"></div>
+
+  <!-- BOTTOM RIGHT HUD: MINIMAP & ZOOM CONTROLS -->
+  <div id="bottom-hud" class="ui-panel">
+    <div id="minimap-container" title="Clique para navegar pelo quadro">
+      <canvas id="minimap-canvas" width="160" height="100"></canvas>
+    </div>
+    <div class="zoom-controls">
+      <button id="btn-grid-style" class="icon-btn-sm" title="Alternar Fundo: Pontos / Grade / Liso">▦</button>
+      <button id="btn-zoom-out" class="icon-btn-sm" title="Diminuir Zoom (-)">−</button>
+      <button id="btn-zoom-reset" class="zoom-readout" title="Resetar Zoom para 100% (Ctrl+0)">100%</button>
+      <button id="btn-zoom-in" class="icon-btn-sm" title="Aumentar Zoom (+)">+</button>
+      <button id="btn-fit-all" class="icon-btn-sm" title="Enquadrar Todos os Elementos na Tela (F)">⛶</button>
+    </div>
+  </div>
+
+  <!-- BOTTOM LEFT STATUS & HINTS -->
+  <div id="status-bar" class="ui-panel">
+    <span id="status-message">Pronto • Arraste imagens ou áudios para o canvas, ou cole com Ctrl+V</span>
+  </div>
+
+  <!-- HELP & DEPLOY MODAL -->
+  <div id="help-modal" class="modal-backdrop hidden">
+    <div class="modal-card ui-panel">
+      <div class="modal-header">
+        <h2>🚀 Guia Rápido, Atalhos & Publicação Online</h2>
+        <button id="btn-close-help" class="close-sm">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="help-grid">
+          <div>
+            <h3>⌨️ Atalhos Estilo Miro & PureRef</h3>
+            <ul class="shortcut-list">
+              <li><kbd>Espaço + Arrastar</kbd> ou <kbd>Botão do Meio</kbd>: Mover Canvas (Pan)</li>
+              <li><kbd>Scroll (Roda do Mouse)</kbd>: Zoom na posição do cursor</li>
+              <li><kbd>Tab</kbd>: Modo Foco PureRef (Ocultar/Mostrar Menus)</li>
+              <li><kbd>Duplo Clique na Imagem</kbd> ou <kbd>F</kbd>: Zoom rápido no item / Voltar</li>
+              <li><kbd>Ctrl + V</kbd>: Colar Imagem da área de transferência ou Texto</li>
+              <li><kbd>Ctrl + P</kbd>: Auto-Pack (Empacotar imagens selecionadas)</li>
+              <li><kbd>C</kbd>: Recortar Imagem selecionada (Crop não-destrutivo)</li>
+              <li><kbd>G</kbd>: Alternar Escala de Cinza (Grayscale) na imagem</li>
+              <li><kbd>Alt + H</kbd> / <kbd>Alt + V</kbd>: Espelhar Imagem Horizontal / Vertical</li>
+              <li><kbd>I</kbd>: Conta-Gotas (Capturar cor de qualquer pixel do canvas)</li>
+              <li><kbd>N</kbd> Post-it • <kbd>T</kbd> Texto • <kbd>S</kbd> Forma • <kbd>L</kbd> Conectar • <kbd>P</kbd> Desenhar</li>
+              <li><kbd>Ctrl + D</kbd>: Duplicar • <kbd>Ctrl + Z / Y</kbd>: Desfazer / Refazer • <kbd>Del</kbd>: Excluir</li>
+            </ul>
+            <h3>📁 Grupos / Pastas (Project)</h3>
+            <ul class="shortcut-list">
+              <li><kbd>Ctrl + G</kbd>: Agrupar seleção em nova pasta (frame + tag + pasta no disco)</li>
+              <li><kbd>Ctrl + Shift + G</kbd>: Desagrupar / tirar itens do grupo</li>
+              <li><kbd>Ctrl + Alt + N</kbd>: Nova pasta dentro da selecionada</li>
+              <li><kbd>Ctrl + S</kbd>: Salvar Project nas pastas do computador</li>
+              <li>Arraste itens para dentro de um frame, ou sobre uma pasta do painel</li>
+              <li>Painel: <kbd>F2</kbd> renomear • <kbd>←/→</kbd> recolher/expandir • <kbd>Alt + clique</kbd> na seta abre/fecha tudo</li>
+            </ul>
+            <h3>📝 Blocos de Texto (Blockly → .txt)</h3>
+            <ul class="shortcut-list">
+              <li><kbd>B</kbd> + clique: novo card de blocos • soltar um <code>.txt</code> no canvas também cria</li>
+              <li>Clique no texto para editar • <strong>dois cliques na borda</strong> do bloco divide entre as linhas</li>
+              <li><kbd>Ctrl + Enter</kbd> (editando): divide no cursor • <kbd>Alt + 1..4</kbd> grifa, <kbd>Alt + 0</kbd> tira</li>
+              <li>Paleta acima do editor ou botão direito ➔ <em>Cor do bloco</em></li>
+              <li>Arraste um bloco para fora do card: vira card novo, ou encaixa em outro card</li>
+              <li>Cada card vira um <code>.txt</code> na pasta do grupo (blocos = parágrafos; marcadores do blocky valem)</li>
+            </ul>
+          </div>
+          <div>
+            <h3>🌐 Como Publicar Online Grátis</h3>
+            <p>Este projeto é 100% Web Estático e já inclui configurações para hospedagem imediata:</p>
+            <ol class="deploy-steps">
+              <li><strong>Opção 1 — Netlify Drop (Mais Rápido, 10 segundos):</strong><br/>Acesse <a href="https://app.netlify.com/drop" target="_blank" rel="noopener">app.netlify.com/drop</a> e arraste a pasta <code>Miro_GRS</code> inteira para a página. Você receberá um link público HTTPS na hora!</li>
+              <li><strong>Opção 2 — Vercel / GitHub Pages:</strong><br/>Suba esta pasta para um repositório no GitHub e ative o <em>GitHub Pages</em> nas configurações, ou execute <code>npx vercel</code> no terminal dentro da pasta.</li>
+              <li><strong>Compartilhando Quadros com Outras Pessoas:</strong><br/>Use o botão <strong>Salvar / Exportar ➔ Exportar Projeto (.mirogrs)</strong> para gerar um arquivo único contendo todas as imagens, sons, ondas sonoras e conexões.</li>
+            </ol>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PROJECTS MODAL -->
+  <div id="projects-modal" class="modal-backdrop hidden">
+    <div class="modal-card ui-panel projects-card">
+      <div class="modal-header">
+        <h2>🗂 Projetos</h2>
+        <button id="btn-close-projects" class="close-sm">✕</button>
+      </div>
+      <div class="projects-toolbar">
+        <button id="btn-projects-new" class="primary-btn">✨ Novo projeto</button>
+        <button id="btn-projects-open-folder" class="ctx-btn">📂 Abrir pasta do computador</button>
+        <button id="btn-projects-import" class="ctx-btn">📄 Importar .mirogrs</button>
+      </div>
+      <div id="projects-list"></div>
+    </div>
+  </div>
+
+  <!-- HIDDEN FILE INPUTS -->
+  <input type="file" id="file-input-media" multiple accept="image/*,audio/*,video/*,.mp3,.wav,.ogg,.m4a,.webm,.flac,.mp4,.mov,.m4v,.txt" class="hidden" />
+  <input type="file" id="file-input-project" accept=".mirogrs,.json" class="hidden" />
+
+  <!-- MAIN APPLICATION SCRIPTS (ES MODULES) -->
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

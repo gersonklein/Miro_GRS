@@ -1,0 +1,10 @@
+# Projeto separado (blocky-pdf-editor), usado só como referência
+blocky-pdf-editor-main/
+
+# Ferramentas / sistema
+.claude/
+node_modules/
+.DS_Store
+Thumbs.db
+desktop.ini
+*.log
