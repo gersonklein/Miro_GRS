@@ -1,8 +1,8 @@
 // js/project-fs.js
 // Salva o Project em PASTAS REAIS no disco (File System Access API — Chrome/Edge):
-//   <pasta do projeto>/project.mirogrs.json
-//   <pasta do projeto>/<Grupo>/<Subgrupo>/.../arquivo.png  +  arquivo.png.meta.json
-//   cada pasta tem _folder.meta.json
+//   <pasta do projeto>/project.mirogrs.json   (único arquivo de controle: pastas, posições, setas...)
+//   <pasta do projeto>/<Grupo>/<Subgrupo>/.../arquivo.png   (só os elementos, sem arquivos extras)
+// Projetos antigos com *.meta.json / _folder.meta.json ainda abrem; esses arquivos somem no próximo save.
 // Save incremental: só regrava o que mudou. Itens excluídos vão para _Lixeira/.
 // Fallback para outros navegadores: exportar .zip com a mesma estrutura.
 
@@ -150,23 +150,6 @@ export function buildDiskPlan(data, { getMediaBlob = null } = {}) {
     }
   }
 
-  for (const f of folders) {
-    const dir = folderDirs.get(f.id);
-    use(dir, FOLDER_META);
-    const fr = frameByFolder.get(f.id);
-    const meta = {
-      kind: 'folder',
-      id: f.id,
-      name: f.name,
-      parentId: f.parentId || null,
-      color: f.color || null,
-      collapsed: !!f.collapsed,
-      frame: fr ? { id: fr.id, x: fr.x, y: fr.y, width: fr.width, height: fr.height, autoFit: fr.autoFit !== false } : null
-    };
-    const content = JSON.stringify(meta, null, 2);
-    files.push({ path: joinPath(dir, FOLDER_META), kind: 'meta', owner: f.id, sig: content, getContent: () => content });
-  }
-
   const nodeFiles = new Map();
   const outNodes = [];
   const sortedNodes = [...nodes].sort((a, b) => String(a.id).localeCompare(String(b.id)));
@@ -176,7 +159,6 @@ export function buildDiskPlan(data, { getMediaBlob = null } = {}) {
       continue;
     }
     const dir = n.folderId && folderDirs.has(n.folderId) ? folderDirs.get(n.folderId) : UNSORTED_DIR;
-    dirs.add(dir);
 
     let ext = '';
     let base = '';
@@ -192,7 +174,7 @@ export function buildDiskPlan(data, { getMediaBlob = null } = {}) {
       sig = signature(src);
       getContent = () => dataUrlToBlob(src);
     } else if (n.type === 'image' || n.type === 'audio') {
-      // Mídia por URL da web: guarda só o .meta.json (com a URL)
+      // Mídia por URL da web: não gera arquivo (a URL fica no project.mirogrs.json)
       kind = 'none';
     } else if (n.type === 'video') {
       if (!n.mediaId || !getMediaBlob) {
@@ -210,7 +192,7 @@ export function buildDiskPlan(data, { getMediaBlob = null } = {}) {
         };
       }
     } else if (n.type === 'textblocks') {
-      // Blocos de Texto: o .txt é o texto montado (regra do blocky); os blocos ficam no .meta.json
+      // Blocos de Texto: o .txt é o texto montado (regra do blocky); os blocos ficam no project.mirogrs.json
       ext = 'txt';
       base = sanitizeName(n.title, 'Texto');
       const text = montarTextoDoJson(n.blocks);
@@ -220,29 +202,24 @@ export function buildDiskPlan(data, { getMediaBlob = null } = {}) {
       ext = 'md';
       const firstLine = textOfNode(n).split('\n').find((l) => l.trim()) || '';
       const prefix = n.type === 'sticky' ? 'postit' : n.type === 'text' ? 'texto' : n.type === 'swatch' ? 'cor' : 'forma';
-      base = sanitizeName(firstLine.slice(0, 40) ? `${prefix} - ${firstLine.slice(0, 40)}` : prefix, prefix);
+      base = n.title && String(n.title).trim()
+        ? sanitizeName(n.title, prefix)
+        : sanitizeName(firstLine.slice(0, 40) ? `${prefix} - ${firstLine.slice(0, 40)}` : prefix, prefix);
       const text = textOfNode(n);
       sig = signature(text) + ':' + text.length;
       getContent = () => text;
     }
 
-    let fileName = null;
+    let filePath = null;
     if (kind !== 'none') {
       // Mantém o nome atual do arquivo se o item não foi renomeado e continua na mesma pasta
       const keep = n.file && dirname(n.file) === dir && n.fileTitle === (n.title || '') && splitExt(basename(n.file)).ext === ext;
-      fileName = use(dir, keep ? basename(n.file) : `${base}.${ext}`);
-      const path = joinPath(dir, fileName);
-      nodeFiles.set(n.id, path);
-      files.push({ path, kind: 'asset', owner: n.id, sig, getContent });
+      const fileName = use(dir, keep ? basename(n.file) : `${base}.${ext}`);
+      filePath = joinPath(dir, fileName);
+      dirs.add(dir);
+      nodeFiles.set(n.id, filePath);
+      files.push({ path: filePath, kind: 'asset', owner: n.id, sig, getContent });
     }
-
-    const metaName = use(dir, fileName ? `${fileName}.meta.json` : `${sanitizeName(n.title || n.type)}.meta.json`);
-    const filePath = fileName ? joinPath(dir, fileName) : null;
-    const metaObj = { kind: 'item', ...n, file: filePath, fileTitle: n.title || '' };
-    delete metaObj.src;
-    if (!isMedia && n.src) metaObj.src = n.src; // URL da web
-    const metaContent = JSON.stringify(metaObj, null, 2);
-    files.push({ path: joinPath(dir, metaName), kind: 'meta', owner: n.id, sig: metaContent, getContent: () => metaContent });
     outNodes.push({ ...n, src: isMedia ? undefined : n.src, file: filePath, fileTitle: n.title || '' });
   }
 
@@ -514,6 +491,9 @@ export class ProjectFS {
         written++;
       }
 
+      // Pastas vazias também existem no disco
+      for (const d of plan.dirs) if (d) await this.getDir(d, true);
+
       // Arquivos que o app escreveu antes e não existem mais no plano
       const newPaths = new Set(plan.files.map((f) => f.path));
       const liveOwners = new Set([...this.app.state.nodes.keys(), ...this.app.state.folders.keys()]);
@@ -634,7 +614,7 @@ export class ProjectFS {
     if (!data.id) data.id = 'proj_' + Date.now().toString(36);
     if (!data.title) data.title = handle.name;
 
-    // 1. Lê todos os .meta.json (eles dizem ONDE cada pasta/item está de verdade no disco)
+    // 1. Projetos antigos: lê os .meta.json (dizem ONDE cada pasta/item está no disco)
     const folderMetaDir = new Map(); // folderId -> dir real
     const itemMetaPath = new Map(); // nodeId -> caminho real do asset
     const folderById = new Map(data.folders.map((f) => [f.id, f]));
@@ -673,27 +653,78 @@ export class ProjectFS {
       }
     }
 
-    // 2. Pastas renomeadas/movidas no Explorer: o nome e o pai seguem o disco
+    // 2. Onde cada arquivo está de verdade: meta antigo > caminho salvo no projeto > busca pelo nome
+    //    (o usuário pode ter movido/renomeado coisas no Explorer)
+    const scanDirs = new Set(scan.dirs);
+    const byBase = new Map(); // nome do arquivo (minúsculo) -> caminhos
+    for (const p of scan.files.keys()) {
+      if (p === PROJECT_FILE || p.endsWith('.meta.json')) continue;
+      const b = basename(p).toLowerCase();
+      if (!byBase.has(b)) byBase.set(b, []);
+      byBase.get(b).push(p);
+    }
+    const claimed = new Set();
+    for (const n of data.nodes) {
+      const viaMeta = itemMetaPath.get(n.id);
+      const real = viaMeta && scan.files.has(viaMeta) ? viaMeta : n.file && scan.files.has(n.file) ? n.file : null;
+      if (real) {
+        n.file = real;
+        claimed.add(real);
+      }
+    }
+    for (const n of data.nodes) {
+      if (!n.file || claimed.has(n.file)) continue;
+      const cands = (byBase.get(basename(n.file).toLowerCase()) || []).filter((p) => !claimed.has(p));
+      if (cands.length === 1) {
+        n.file = cands[0];
+        claimed.add(cands[0]);
+      }
+    }
+
+    // 3. Onde cada pasta está: meta antigo > dir salvo no projeto > deduzido pelos itens/subpastas
+    const folderDir = new Map(folderMetaDir);
+    for (const f of data.folders) {
+      if (!folderDir.has(f.id) && f.dir && scanDirs.has(f.dir)) folderDir.set(f.id, f.dir);
+    }
+    const ownedDirs = new Set(folderDir.values());
+    const depthOf = (f) => (f.dir ? f.dir.split('/').length : 0);
+    const lost = data.folders.filter((f) => !folderDir.has(f.id) && f.dir).sort((a, b) => depthOf(b) - depthOf(a));
+    for (const f of lost) {
+      // Pasta renomeada/movida no Explorer: segue o lugar onde os itens (ou subpastas) dela foram parar
+      const where = new Set();
+      for (const n of data.nodes) {
+        if (n.folderId === f.id && n.file && claimed.has(n.file)) where.add(dirname(n.file));
+      }
+      for (const c of data.folders) {
+        if (c.parentId === f.id && folderDir.has(c.id)) where.add(dirname(folderDir.get(c.id)));
+      }
+      if (where.size !== 1) continue;
+      const d = [...where][0];
+      if (!d || d === UNSORTED_DIR || ownedDirs.has(d) || !scanDirs.has(d)) continue;
+      folderDir.set(f.id, d);
+      ownedDirs.add(d);
+    }
     const dirToFolder = new Map();
-    for (const [fid, dir] of folderMetaDir) dirToFolder.set(dir, fid);
-    for (const [fid, dir] of folderMetaDir) {
+    for (const [fid, dir] of folderDir) dirToFolder.set(dir, fid);
+    // Nome e pai seguem o disco
+    for (const [fid, dir] of folderDir) {
       const f = folderById.get(fid);
       if (!f) continue;
       if (sanitizeName(f.name, 'Grupo') !== basename(dir)) f.name = basename(dir);
-      f.parentId = dirToFolder.get(dirname(dir)) || null;
+      const pd = dirname(dir);
+      if (!pd) f.parentId = null;
+      else if (dirToFolder.has(pd)) f.parentId = dirToFolder.get(pd);
     }
-    // Pastas sem meta: usa o caminho calculado
+    // Pastas que não estão no disco (ex.: vazias): usa o caminho calculado
     const computed = buildDiskPlan(data).folderDirs;
     for (const [fid, dir] of computed) {
-      if (!folderMetaDir.has(fid) && !dirToFolder.has(dir)) dirToFolder.set(dir, fid);
+      if (!folderDir.has(fid) && !dirToFolder.has(dir)) dirToFolder.set(dir, fid);
     }
 
-    // 3. Itens movidos entre pastas no Explorer mudam de grupo
+    // 4. Itens movidos entre pastas no Explorer mudam de grupo
     for (const n of data.nodes) {
-      const real = itemMetaPath.get(n.id);
-      if (real && scan.files.has(real)) {
-        n.file = real;
-        const d = dirname(real);
+      if (n.file && claimed.has(n.file)) {
+        const d = dirname(n.file);
         n.folderId = d === UNSORTED_DIR || !d ? null : dirToFolder.get(d) || n.folderId || null;
       }
       if (n.type === 'shape' && n.shapeType === 'frame' && n.frameFolderId && folderById.has(n.frameFolderId)) {
@@ -701,7 +732,7 @@ export class ProjectFS {
       }
     }
 
-    // 4. Lê o conteúdo dos assets
+    // 5. Lê o conteúdo dos assets
     let txtEditados = 0;
     const loadedSigs = [];
     const known = new Set([PROJECT_FILE]);
@@ -744,7 +775,7 @@ export class ProjectFS {
       } catch {}
     }
 
-    // 5. Pastas criadas no Explorer viram grupos; arquivos novos viram itens
+    // 6. Pastas criadas no Explorer viram grupos; arquivos novos viram itens
     const newFolderIds = [];
     for (const dir of [...scan.dirs].sort((a, b) => a.split('/').length - b.split('/').length)) {
       if (dir === UNSORTED_DIR || dir.startsWith(UNSORTED_DIR + '/') || dirToFolder.has(dir)) continue;
@@ -772,10 +803,10 @@ export class ProjectFS {
     for (const n of data.nodes) {
       if (n.file && scan.files.has(n.file)) {
         manifest.push([n.file, n.id]);
-        if (scan.files.has(n.file + '.meta.json')) manifest.push([n.file + '.meta.json', n.id]);
       }
     }
-    for (const [fid, dir] of folderMetaDir) manifest.push([joinPath(dir, FOLDER_META), fid]);
+    // .meta.json de versões antigas: entram no manifest para serem apagados no próximo save
+    for (const p of scan.files.keys()) if (p.endsWith('.meta.json')) manifest.push([p, '__legacy_meta']);
 
     await this.app.openProjectData(data, { handle, manifest, sigs: loadedSigs });
 

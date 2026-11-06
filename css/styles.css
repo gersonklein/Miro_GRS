@@ -1564,6 +1564,27 @@ textarea {
   font-weight: 600;
 }
 
+.pp-row.pp-item {
+  height: 22px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.pp-row.pp-item:hover,
+.pp-row.pp-item.selected {
+  color: var(--text-main);
+}
+
+.pp-row.pp-unsorted ~ .pp-item {
+  font-style: normal;
+}
+
+.pp-type-icon {
+  width: 16px;
+  text-align: center;
+  font-size: 11px;
+}
+
 .pp-caret {
   width: 12px;
   text-align: center;

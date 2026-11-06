@@ -504,6 +504,72 @@ export class FoldersManager {
     this.afterChange();
   }
 
+  // Nome livre entre as pastas irmãs: "Cenas" → "Cenas (2)", "Cenas (3)"...
+  uniqueSiblingName(name, parentId) {
+    const base = String(name || 'Grupo').replace(/\s*\(\d+\)$/, '').trim() || 'Grupo';
+    const taken = new Set(this.getChildren(parentId).map((f) => f.name.toLowerCase()));
+    let i = 2;
+    while (taken.has(`${base} (${i})`.toLowerCase())) i++;
+    return `${base} (${i})`;
+  }
+
+  // Duplica a pasta com subpastas (níveis ilimitados), frames, itens e setas internas.
+  // A cópia fica ao lado do original, na mesma pasta-pai, com nome único.
+  // Retorna { folder, nodes } (nodes = todos os nós criados).
+  duplicateFolder(folderId, { undo = true, refresh = true } = {}) {
+    const src = this.get(folderId);
+    if (!src) return null;
+    if (undo) this.app.pushUndoState();
+    const nm = this.app.nodesManager;
+    const srcFrame = this.getFrameNode(folderId);
+    const dx = srcFrame ? Math.round(srcFrame.width + 60) : 60;
+    const dy = 0;
+    const idMap = new Map(); // id de nó antigo -> novo
+    const created = [];
+
+    const cloneNode = (orig, patch) => {
+      const cfg = JSON.parse(JSON.stringify(orig));
+      delete cfg.id;
+      Object.assign(cfg, patch, {
+        file: null,
+        fileTitle: null,
+        x: orig.x + dx,
+        y: orig.y + dy,
+        zIndex: orig.zIndex
+      });
+      const n = nm.createNode(cfg, false);
+      idMap.set(orig.id, n.id);
+      created.push(n);
+      return n;
+    };
+
+    const cloneTree = (srcId, newParentId, newName) => {
+      const s = this.get(srcId);
+      const folder = { id: this.newId(), name: newName, parentId: newParentId, color: s.color || null, collapsed: !!s.collapsed };
+      this.folders.set(folder.id, folder);
+      const fr = this.getFrameNode(srcId);
+      if (fr) cloneNode(fr, { frameFolderId: folder.id, folderId: newParentId, title: newName });
+      for (const item of this.itemsInFolder(srcId, false)) cloneNode(item, { folderId: folder.id, frameFolderId: null });
+      for (const child of this.getChildren(srcId)) cloneTree(child.id, folder.id, child.name);
+      return folder;
+    };
+
+    const parentId = src.parentId || null;
+    const folder = cloneTree(folderId, parentId, this.uniqueSiblingName(src.name, parentId));
+
+    // Setas entre itens que foram copiados juntos
+    const conns = this.app.state.connections;
+    for (const c of Array.from(conns.values())) {
+      if (!idMap.has(c.from) || !idMap.has(c.to)) continue;
+      const id = 'conn_' + Date.now() + '_' + Math.floor(Math.random() * 1e6);
+      conns.set(id, { ...JSON.parse(JSON.stringify(c)), id, from: idMap.get(c.from), to: idMap.get(c.to) });
+    }
+
+    if (refresh) this.afterChange();
+    this.app.setStatus(`Pasta "${src.name}" duplicada como "${folder.name}" (${created.length} elemento(s), subpastas mantidas).`);
+    return { folder, nodes: created };
+  }
+
   removeFrameOnly(folderId) {
     const fr = this.getFrameNode(folderId);
     if (!fr) return;
@@ -560,8 +626,8 @@ export class FoldersManager {
       if (!folder) continue;
       if (folder.parentId && movedFolderIds.has(folder.parentId)) continue;
       const exclude = new Set([folder.id, ...this.getDescendantIds(folder.id)]);
-      const target = this.findFolderAtPoint(fr.x + fr.width / 2, fr.y + fr.height / 2, exclude);
-      if (target && target !== folder.parentId) {
+      const target = this.dropTargetFor(fr, folder.parentId || null, exclude);
+      if (target !== undefined && target !== (folder.parentId || null)) {
         this.moveFolder(folder.id, target, { undo: false, relocate: false, refresh: false });
       }
     }
@@ -570,10 +636,21 @@ export class FoldersManager {
       if (this.isFolderFrame(n)) continue;
       const c = this.containerOf(n);
       if (c && movedFolderIds.has(c)) continue;
-      const target = this.findFolderAtPoint(n.x + n.width / 2, n.y + n.height / 2, movedFolderIds);
-      if (target && target !== c) n.folderId = target;
+      const target = this.dropTargetFor(n, c, movedFolderIds);
+      if (target !== undefined && target !== c) n.folderId = target;
     }
     this.afterChange();
+  }
+
+  // Pasta de destino de um nó solto no canvas.
+  // - centro sobre um frame → essa pasta
+  // - centro fora de qualquer frame, mas a pasta atual tem frame → saiu dela: sobe para a raiz
+  // - pasta atual sem frame no canvas → undefined (não dá para "sair" de algo invisível; mantém)
+  dropTargetFor(node, currentId, exclude = new Set()) {
+    const target = this.findFolderAtPoint(node.x + node.width / 2, node.y + node.height / 2, exclude);
+    if (target) return target;
+    if (!currentId) return null;
+    return this.getFrameNode(currentId) ? null : undefined;
   }
 
   // Nós recém-criados num ponto (post-it, arquivos soltos...) entram no frame embaixo deles

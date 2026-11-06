@@ -325,6 +325,7 @@ class MiroGRSApp {
     const selected = this.nodesManager.getSelectedNodes();
     const connId = this.connectionsDrawing.selectedConnectionId;
     const isDrawingTool = ['pen', 'highlighter', 'sticky', 'shape', 'text'].includes(this.currentTool);
+    this.projectPanel?.onCanvasSelectionChanged();
 
     if (selected.length === 0 && !connId && !isDrawingTool) {
       bar.classList.add('hidden');
@@ -631,6 +632,11 @@ class MiroGRSApp {
     });
 
     // Ações Comuns na Barra Contextual
+    document.getElementById('ctx-btn-rename').addEventListener('click', () => {
+      const sel = this.nodesManager.getSelectedNodes();
+      if (sel.length === 1) this.nodesManager.promptRename(sel[0].id);
+      else this.setStatus('Selecione 1 elemento para renomear.');
+    });
     document.getElementById('ctx-btn-focus-item').addEventListener('click', () => this.canvasEngine.fitAllOrSelection());
     document.getElementById('ctx-btn-lock').addEventListener('click', () => this.nodesManager.toggleLockSelected());
     document.getElementById('ctx-btn-front').addEventListener('click', () => this.nodesManager.bringToFront());
@@ -982,6 +988,14 @@ class MiroGRSApp {
       if (e.altKey && e.key.toLowerCase() === 'v') {
         e.preventDefault();
         this.pureRefTools.toggleFlip('v');
+        return;
+      }
+
+      if (e.key === 'F2') {
+        e.preventDefault();
+        const sel = this.nodesManager.getSelectedNodes();
+        if (sel.length === 1) this.nodesManager.promptRename(sel[0].id);
+        else this.setStatus('Selecione 1 elemento para renomear (F2).');
         return;
       }
 

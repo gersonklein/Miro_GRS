@@ -1,11 +1,18 @@
 // js/project-panel.js
-// Painel "Project" estilo Unity: árvore de pastas recursiva (níveis ilimitados),
-// breadcrumb, busca, renomear inline, menu de contexto e drag & drop.
+// Painel "Project" estilo Unity: árvore de pastas recursiva (níveis ilimitados) com os
+// arquivos (imagens, sons, vídeos, textos...) dentro de cada pasta, breadcrumb, busca,
+// renomear inline (pastas e arquivos), menu de contexto e drag & drop.
 
 import { askText, askChoice, showContextMenu } from './ui-dialogs.js';
 
 const UNSORTED = '__unsorted';
 const FOLDER_MIME = 'application/x-mirogrs-folder';
+const ITEM_MIME = 'application/x-mirogrs-item';
+const ITEM_KEY = 'item:';
+const TYPE_ICON = {
+  image: '🖼', audio: '🎵', video: '🎬', textblocks: '📝', sticky: '🗒', text: '🔤', shape: '⬛', swatch: '🎨'
+};
+const TYPE_ORDER = ['image', 'video', 'audio', 'textblocks', 'sticky', 'text', 'shape', 'swatch'];
 
 export class ProjectPanel {
   constructor(app) {
@@ -19,6 +26,9 @@ export class ProjectPanel {
     this.selectedId = null; // id de pasta, UNSORTED ou null
     this.focusRootId = null; // "focar nesta pasta": a árvore começa nela
     this.renamingId = null;
+    this.selectedItemId = null; // arquivo (nó) selecionado no painel
+    this.renamingItemId = null;
+    this.unsortedCollapsed = false;
     this.hoverRow = null;
     this.bind();
     this.restoreLayout();
@@ -55,6 +65,7 @@ export class ProjectPanel {
     document.getElementById('pp-new-folder').addEventListener('click', () => this.newFolderFlow(this.currentFolderId()));
     document.getElementById('pp-collapse-all').addEventListener('click', () => {
       for (const f of this.fm.folders.values()) f.collapsed = true;
+      this.unsortedCollapsed = true;
       this.render();
     });
     document.getElementById('pp-isolate').addEventListener('click', () => this.toggleIsolate());
@@ -100,18 +111,44 @@ export class ProjectPanel {
   }
 
   // ---------- Render ----------
+  get nm() {
+    return this.app.nodesManager;
+  }
+
+  sortedItems(folderId) {
+    const nm = this.nm;
+    return this.fm.itemsInFolder(folderId, false).sort((a, b) => {
+      const ta = TYPE_ORDER.indexOf(a.type);
+      const tb = TYPE_ORDER.indexOf(b.type);
+      if (ta !== tb) return ta - tb;
+      return nm.getDisplayName(a).localeCompare(nm.getDisplayName(b), 'pt-BR', { numeric: true, sensitivity: 'base' });
+    });
+  }
+
   render() {
     if (this.selectedId && this.selectedId !== UNSORTED && !this.fm.get(this.selectedId)) this.selectedId = null;
     if (this.focusRootId && !this.fm.get(this.focusRootId)) this.focusRootId = null;
+    if (this.selectedItemId && !this.app.state.nodes.has(this.selectedItemId)) this.selectedItemId = null;
 
     const q = this.searchEl.value.trim().toLowerCase();
-    let visible = null;
+    let visible = null; // pastas visíveis na busca
+    let visibleItems = null; // arquivos que batem com a busca
+    let unsortedHasMatch = false;
     if (q) {
       visible = new Set();
+      visibleItems = new Set();
       for (const f of this.fm.folders.values()) {
         if (f.name.toLowerCase().includes(q)) {
           for (const a of this.fm.getAncestors(f.id)) visible.add(a.id);
         }
+      }
+      for (const n of this.app.state.nodes.values()) {
+        if (this.fm.isFolderFrame(n)) continue;
+        if (!this.nm.getDisplayName(n).toLowerCase().includes(q)) continue;
+        visibleItems.add(n.id);
+        const fid = this.fm.containerOf(n);
+        if (fid) for (const a of this.fm.getAncestors(fid)) visible.add(a.id);
+        else unsortedHasMatch = true;
       }
     }
 
@@ -131,31 +168,55 @@ export class ProjectPanel {
     });
     tree.appendChild(rootRow);
 
+    const renderItems = (folderId, depth) => {
+      for (const n of this.sortedItems(folderId)) {
+        if (visibleItems && !visibleItems.has(n.id)) continue;
+        tree.appendChild(this.buildItemRow(n, depth, !!q));
+      }
+    };
+
     const renderLevel = (parentId, depth) => {
       for (const f of this.fm.getChildren(parentId)) {
         if (visible && !visible.has(f.id)) continue;
         const kids = this.fm.getChildren(f.id);
+        const nItems = this.fm.itemsInFolder(f.id, false).length;
+        const open = !f.collapsed || !!visible;
         const row = this.buildRow({
           id: f.id,
           name: f.name,
           depth,
-          hasChildren: kids.length > 0,
+          hasChildren: kids.length > 0 || nItems > 0,
           collapsed: f.collapsed && !visible,
           color: this.fm.getColor(f.id),
           count: this.fm.countItems(f.id, true),
           match: q && f.name.toLowerCase().includes(q)
         });
         tree.appendChild(row);
-        if (kids.length && (!f.collapsed || visible)) renderLevel(f.id, depth + 1);
+        if (open) {
+          renderLevel(f.id, depth + 1);
+          renderItems(f.id, depth + 1);
+        }
       }
     };
     renderLevel(this.focusRootId, 1);
+    if (this.focusRootId) renderItems(this.focusRootId, 1);
 
-    if (!this.focusRootId) {
+    if (!this.focusRootId && (!q || unsortedHasMatch)) {
       const unsorted = this.fm.itemsInFolder(null, false).length;
+      const open = !this.unsortedCollapsed || !!q;
       tree.appendChild(
-        this.buildRow({ id: UNSORTED, name: 'Sem categoria', depth: 1, count: unsorted, color: '#64748b', isUnsorted: true })
+        this.buildRow({
+          id: UNSORTED,
+          name: 'Sem categoria',
+          depth: 1,
+          count: unsorted,
+          color: '#64748b',
+          isUnsorted: true,
+          hasChildren: unsorted > 0,
+          collapsed: this.unsortedCollapsed && !q
+        })
       );
+      if (open) renderItems(null, 2);
     }
 
     this.renderBreadcrumb();
@@ -164,6 +225,112 @@ export class ProjectPanel {
       linked ? '💾 ' + linked : 'não salvo em pasta'
     }`;
     document.getElementById('pp-isolate').classList.toggle('active', !!this.fm.isolateId);
+    this.syncItemSelection();
+  }
+
+  // Redesenho adiado (itens criados/apagados/renomeados no canvas). Não interrompe um renomear em curso.
+  scheduleRender() {
+    clearTimeout(this.renderTimer);
+    this.renderTimer = setTimeout(() => {
+      if (this.renamingId || this.renamingItemId) return;
+      this.render();
+    }, 200);
+  }
+
+  onCanvasSelectionChanged() {
+    if (this.selectedItemId && !this.nm.selectedIds.has(this.selectedItemId)) this.selectedItemId = null;
+    this.syncItemSelection();
+  }
+
+  // Destaca no painel os arquivos selecionados no canvas (sem refazer a árvore)
+  syncItemSelection() {
+    const sel = this.nm.selectedIds;
+    for (const row of this.treeEl.querySelectorAll('.pp-item')) {
+      const id = row.dataset.itemRow;
+      row.classList.toggle('selected', id === this.selectedItemId || sel.has(id));
+    }
+  }
+
+  buildItemRow(n, depth, match = false) {
+    const nm = this.nm;
+    const row = document.createElement('div');
+    row.className = 'pp-row pp-item';
+    if (match) row.classList.add('pp-match');
+    row.dataset.itemRow = n.id;
+    row.dataset.rowKey = ITEM_KEY + n.id;
+    row.style.paddingLeft = `${6 + depth * 12}px`;
+    const name = nm.getDisplayName(n);
+    row.title = n.file ? `${name}\n${n.file}` : name;
+
+    const caret = document.createElement('span');
+    caret.className = 'pp-caret';
+    row.appendChild(caret);
+
+    const icon = document.createElement('span');
+    icon.className = 'pp-icon pp-type-icon';
+    icon.textContent = TYPE_ICON[n.type] || '•';
+    row.appendChild(icon);
+
+    const label = document.createElement('span');
+    label.className = 'pp-name';
+    label.textContent = name;
+    row.appendChild(label);
+
+    if (this.renamingItemId === n.id) this.mountRenameInput(row, label, n.id, true);
+
+    row.addEventListener('click', () => {
+      this.selectedItemId = n.id;
+      this.selectedId = null;
+      this.treeEl.focus({ preventScroll: true });
+      this.selectNodesOnCanvas([n]);
+    });
+    row.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      this.startRenameItem(n.id);
+    });
+    row.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.selectedItemId = n.id;
+      this.selectedId = null;
+      this.syncItemSelection();
+      this.openItemMenu(n.id, e.clientX, e.clientY);
+    });
+
+    row.draggable = true;
+    row.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData(ITEM_MIME, n.id);
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    return row;
+  }
+
+  startRenameItem(id) {
+    this.renamingItemId = id;
+    this.render();
+  }
+
+  openItemMenu(id, x, y) {
+    const nm = this.nm;
+    const n = this.app.state.nodes.get(id);
+    if (!n) return;
+    const selectOnly = () => {
+      nm.selectedIds.clear();
+      nm.selectedIds.add(id);
+      nm.syncSelectionClasses();
+    };
+    showContextMenu(x, y, [
+      { label: '✎ Renomear (F2)', action: () => this.startRenameItem(id) },
+      { label: '🔍 Mostrar no canvas', action: () => this.selectNodesOnCanvas([n]) },
+      { label: '⧉ Duplicar', action: () => { selectOnly(); nm.duplicateSelected(); } },
+      {
+        label: '◌ Tirar da pasta (Sem categoria)',
+        disabled: !this.fm.containerOf(n),
+        action: () => this.fm.assignNodes([n], null)
+      },
+      { sep: true },
+      { label: '🗑 Excluir', danger: true, disabled: !!n.locked, action: () => { selectOnly(); nm.deleteSelected(); } }
+    ]);
   }
 
   buildRow({ id, name, depth, hasChildren = false, collapsed = false, color = null, count = 0, isRoot = false, isUnsorted = false, match = false }) {
@@ -174,8 +341,9 @@ export class ProjectPanel {
     if (match) row.classList.add('pp-match');
     const rowKey = isRoot ? (id || '') : id;
     if (!isRoot && this.selectedId === id) row.classList.add('selected');
-    if (isRoot && !this.selectedId) row.classList.add('selected');
+    if (isRoot && !this.selectedId && !this.selectedItemId) row.classList.add('selected');
     row.dataset.folderRow = isRoot ? (id || '__root') : id;
+    row.dataset.rowKey = isRoot ? '__root' : id;
     row.dataset.dropFolder = isUnsorted ? '' : isRoot ? (id || '') : id;
     row.style.paddingLeft = `${6 + depth * 12}px`;
     row.title = isRoot || isUnsorted ? name : this.fm.getPathString(id);
@@ -186,6 +354,11 @@ export class ProjectPanel {
     caret.addEventListener('click', (e) => {
       e.stopPropagation();
       if (!hasChildren) return;
+      if (isUnsorted) {
+        this.unsortedCollapsed = !this.unsortedCollapsed;
+        this.render();
+        return;
+      }
       const f = this.fm.get(id);
       if (e.altKey) {
         const next = !f.collapsed;
@@ -217,12 +390,13 @@ export class ProjectPanel {
     row.appendChild(cnt);
 
     if (!isRoot && !isUnsorted && this.renamingId === id) {
-      this.mountRenameInput(row, label, id);
+      this.mountRenameInput(row, label, id, false);
     }
 
     // Clique: seleciona pasta + itens no canvas e dá zoom
     row.addEventListener('click', () => {
       this.selectedId = isRoot ? null : id;
+      this.selectedItemId = null;
       this.treeEl.focus({ preventScroll: true });
       if (isRoot) {
         if (id) this.selectFolderOnCanvas(id);
@@ -264,7 +438,7 @@ export class ProjectPanel {
     }
     row.addEventListener('dragover', (e) => {
       const types = Array.from(e.dataTransfer.types || []);
-      if (types.includes(FOLDER_MIME) || types.includes('Files')) {
+      if (types.includes(FOLDER_MIME) || types.includes(ITEM_MIME) || types.includes('Files')) {
         if (isUnsorted && types.includes(FOLDER_MIME)) return;
         e.preventDefault();
         e.stopPropagation();
@@ -281,6 +455,11 @@ export class ProjectPanel {
         e.stopPropagation();
         const dragged = e.dataTransfer.getData(FOLDER_MIME);
         if (dragged) this.fm.moveFolder(dragged, target);
+      } else if (types.includes(ITEM_MIME)) {
+        e.preventDefault();
+        e.stopPropagation();
+        const n = this.app.state.nodes.get(e.dataTransfer.getData(ITEM_MIME));
+        if (n && this.fm.containerOf(n) !== target) this.fm.assignNodes([n], target);
       } else if (e.dataTransfer.files?.length) {
         e.preventDefault();
         e.stopPropagation();
@@ -383,17 +562,21 @@ export class ProjectPanel {
     this.render();
   }
 
-  mountRenameInput(row, label, id) {
+  mountRenameInput(row, label, id, isItem = false) {
     const input = document.createElement('input');
     input.className = 'pp-rename';
-    input.value = this.fm.get(id).name;
+    input.value = isItem ? this.nm.getDisplayName(this.app.state.nodes.get(id)) : this.fm.get(id).name;
     label.replaceWith(input);
     let done = false;
     const finish = (commit) => {
       if (done) return;
       done = true;
       this.renamingId = null;
-      if (commit) this.fm.renameFolder(id, input.value);
+      this.renamingItemId = null;
+      if (commit) {
+        if (isItem) this.nm.renameNode(id, input.value);
+        else this.fm.renameFolder(id, input.value);
+      }
       this.render();
       this.treeEl.focus({ preventScroll: true });
     };
@@ -457,6 +640,13 @@ export class ProjectPanel {
       { label: '＋ Nova subpasta', action: () => this.newFolderFlow(id) },
       { label: '✎ Renomear (F2)', action: () => this.startRename(id) },
       { label: '🎨 Cor…', action: () => this.pickColor(id) },
+      {
+        label: '⧉ Duplicar pasta (com subpastas)',
+        action: () => {
+          const res = this.fm.duplicateFolder(id);
+          if (res) this.revealFolder(res.folder.id);
+        }
+      },
       { sep: true },
       {
         label: `⇲ Mover ${selected.length} selecionado(s) para cá`,
@@ -493,10 +683,10 @@ export class ProjectPanel {
   }
 
   // ---------- Teclado ----------
-  visibleRowIds() {
+  visibleRowKeys() {
     return Array.from(this.treeEl.querySelectorAll('.pp-row'))
-      .map((r) => r.dataset.folderRow)
-      .filter((v) => v !== '__root');
+      .map((r) => r.dataset.rowKey)
+      .filter((v) => v && v !== '__root');
   }
 
   onTreeKey(e) {
@@ -508,12 +698,44 @@ export class ProjectPanel {
     };
     if (key === 'ArrowDown' || key === 'ArrowUp') {
       handled();
-      const ids = this.visibleRowIds();
-      let idx = ids.indexOf(this.selectedId);
-      idx = key === 'ArrowDown' ? Math.min(ids.length - 1, idx + 1) : Math.max(0, idx - 1);
-      this.selectedId = ids[idx] || null;
+      const keys = this.visibleRowKeys();
+      const cur = this.selectedItemId ? ITEM_KEY + this.selectedItemId : this.selectedId;
+      let idx = keys.indexOf(cur);
+      idx = key === 'ArrowDown' ? Math.min(keys.length - 1, idx + 1) : Math.max(0, idx - 1);
+      const next = keys[idx] || null;
+      if (next && next.startsWith(ITEM_KEY)) {
+        this.selectedItemId = next.slice(ITEM_KEY.length);
+        this.selectedId = null;
+      } else {
+        this.selectedItemId = null;
+        this.selectedId = next;
+      }
       this.render();
       this.treeEl.querySelector('.pp-row.selected')?.scrollIntoView({ block: 'nearest' });
+      return;
+    }
+    // Arquivo selecionado no painel
+    if (this.selectedItemId) {
+      const n = this.app.state.nodes.get(this.selectedItemId);
+      if (!n) return;
+      if (key === 'Enter') {
+        handled();
+        this.selectNodesOnCanvas([n]);
+      } else if (key === 'F2') {
+        handled();
+        this.startRenameItem(n.id);
+      } else if (key === 'Delete') {
+        handled();
+        this.nm.selectedIds.clear();
+        this.nm.selectedIds.add(n.id);
+        this.nm.deleteSelected();
+      } else if (key === 'ArrowLeft') {
+        handled();
+        const fid = this.fm.containerOf(n);
+        this.selectedItemId = null;
+        this.selectedId = fid || UNSORTED;
+        this.render();
+      }
       return;
     }
     if (!id) {

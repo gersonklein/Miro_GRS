@@ -18,7 +18,7 @@ import {
   resumoDoJson,
   workspaceDoProjetoBlocky
 } from './text-blocks-format.js';
-import { askText, showContextMenu } from './ui-dialogs.js';
+import { showContextMenu } from './ui-dialogs.js';
 
 const BLOCKLY_VERSION = '10.4.3';
 const BLOCKLY_URLS = [
@@ -766,14 +766,9 @@ export class TextBlocksManager {
     title.className = 'tb-title';
     title.textContent = '📝 ' + (node.title || 'Texto');
     title.title = 'Duplo clique para renomear (vira o nome do .txt)';
-    title.addEventListener('dblclick', async (e) => {
+    title.addEventListener('dblclick', (e) => {
       e.stopPropagation();
-      const nome = await askText({ title: 'Nome do bloco de texto (.txt)', value: node.title || 'Texto', okText: 'Renomear' });
-      if (!nome) return;
-      this.app.pushUndoState();
-      node.title = nome;
-      title.textContent = '📝 ' + nome;
-      this.app.storage.scheduleAutoSave();
+      this.app.nodesManager.promptRename(node.id);
     });
     header.appendChild(title);
 

@@ -66,6 +66,7 @@ export class StorageManager {
   // silent: mudança que não precisa ir para o disco (ex.: mover a câmera)
   scheduleAutoSave({ silent = false } = {}) {
     if (!silent && !this.app.isLoading) this.app.projectFs?.markDirty();
+    if (!this.app.isLoading) this.app.projectPanel?.scheduleRender();
     if (this.saveTimer) clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => {
       this.saveCurrentBoard();

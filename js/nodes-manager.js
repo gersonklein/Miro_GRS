@@ -21,6 +21,66 @@ export class NodesManager {
     return res;
   }
 
+  // ---------- Nome / Renomear ----------
+  static TYPE_LABELS = {
+    image: 'Imagem', audio: 'Som', video: 'Vídeo', textblocks: 'Texto', sticky: 'Post-it',
+    text: 'Texto livre', shape: 'Forma', swatch: 'Cor'
+  };
+
+  getDisplayName(n) {
+    if (!n) return '';
+    if (n.title && String(n.title).trim()) return String(n.title).trim();
+    const firstLine = String(n.text || '').split('\n').find((l) => l.trim());
+    if (firstLine) return firstLine.trim().slice(0, 60);
+    if (n.type === 'swatch' && n.fill) return n.fill;
+    return NodesManager.TYPE_LABELS[n.type] || 'Item';
+  }
+
+  renameNode(id, name) {
+    const n = this.app.state.nodes.get(id);
+    const clean = String(name || '').trim();
+    if (!n || !clean) return false;
+    const fm = this.app.foldersManager;
+    if (fm.isFolderFrame(n)) {
+      fm.renameFolder(n.frameFolderId, clean);
+      return true;
+    }
+    if (clean === (n.title || '')) return false;
+    this.app.pushUndoState();
+    n.title = clean;
+    const el = this.nodesLayer.querySelector(`.canvas-node[data-id="${CSS.escape(id)}"]`);
+    if (el) {
+      const set = (sel, text) => {
+        const t = el.querySelector(sel);
+        if (t) t.textContent = text;
+      };
+      set('.image-caption-bar', clean);
+      const img = el.querySelector('.image-viewport img');
+      if (img) img.alt = clean;
+      set('.audio-title', '🎵 ' + clean);
+      set('.video-name', '🎬 ' + clean);
+      set('.tb-title', '📝 ' + clean);
+      set('.frame-title-badge', clean);
+    }
+    this.app.storage.scheduleAutoSave();
+    this.app.projectPanel?.render();
+    this.app.setStatus(`Renomeado para "${clean}". O arquivo na pasta acompanha no próximo salvamento.`);
+    return true;
+  }
+
+  async promptRename(id) {
+    const n = this.app.state.nodes.get(id);
+    if (!n) return;
+    const fm = this.app.foldersManager;
+    const isFolder = fm.isFolderFrame(n);
+    const name = await askText({
+      title: isFolder ? 'Renomear grupo / pasta' : `Renomear ${NodesManager.TYPE_LABELS[n.type] || 'item'}`,
+      value: isFolder ? fm.get(n.frameFolderId).name : this.getDisplayName(n),
+      okText: 'Renomear'
+    });
+    if (name) this.renameNode(id, name);
+  }
+
   selectNode(id, additive = false) {
     if (!additive) {
       this.selectedIds.clear();
@@ -154,23 +214,9 @@ export class NodesManager {
         const badge = document.createElement('div');
         badge.className = 'frame-title-badge';
         badge.textContent = nodeData.title || 'Frame / Grupo Visual';
-        badge.addEventListener('dblclick', async (e) => {
+        badge.addEventListener('dblclick', (e) => {
           e.stopPropagation();
-          const fm = this.app.foldersManager;
-          const isFolder = fm.isFolderFrame(nodeData);
-          const name = await askText({
-            title: isFolder ? 'Renomear grupo / pasta' : 'Nome do Frame',
-            value: isFolder ? fm.get(nodeData.frameFolderId).name : nodeData.title || 'Frame',
-            okText: 'Renomear'
-          });
-          if (!name) return;
-          if (isFolder) {
-            fm.renameFolder(nodeData.frameFolderId, name);
-          } else {
-            nodeData.title = name;
-            badge.textContent = name;
-            this.app.storage.scheduleAutoSave();
-          }
+          this.promptRename(nodeData.id);
         });
         badge.addEventListener('contextmenu', (e) => {
           if (!this.app.foldersManager.isFolderFrame(nodeData)) return;
@@ -200,6 +246,11 @@ export class NodesManager {
       const caption = document.createElement('div');
       caption.className = 'image-caption-bar';
       caption.textContent = nodeData.title || 'Imagem PureRef (Duplo clique = Foco Zoom)';
+      caption.title = 'Duplo clique para renomear';
+      caption.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        this.promptRename(nodeData.id);
+      });
       el.appendChild(caption);
 
       // Duplo clique em imagem foca/desfoca o zoom nela (estilo PureRef)
@@ -235,14 +286,10 @@ export class NodesManager {
       `;
 
       const titleEl = el.querySelector('.audio-title');
+      titleEl.textContent = '🎵 ' + (nodeData.title || 'Clip de Áudio');
       titleEl.addEventListener('dblclick', (e) => {
         e.stopPropagation();
-        const nv = prompt('Nome do Card de Áudio:', nodeData.title || 'Clip de Áudio');
-        if (nv !== null) {
-          nodeData.title = nv.trim();
-          titleEl.textContent = '🎵 ' + nodeData.title;
-          this.app.storage.scheduleAutoSave();
-        }
+        this.promptRename(nodeData.id);
       });
 
       this.app.audioEngine.setupAudioNodeDOM(nodeData, el);
@@ -802,8 +849,25 @@ export class NodesManager {
     if (selected.length === 0) return;
     this.app.pushUndoState();
     this.clearSelection();
+    const fm = this.app.foldersManager;
+
+    // Frames de pasta: duplica a pasta inteira (subpastas + itens), só os do topo da seleção
+    const frameFolderIds = new Set(selected.filter((n) => fm.isFolderFrame(n)).map((n) => n.frameFolderId));
+    const insideSelected = (fid) => !!fid && (frameFolderIds.has(fid) || [...frameFolderIds].some((s) => fm.isDescendant(fid, s)));
+    const topFolders = [...frameFolderIds].filter((fid) => !insideSelected(fm.get(fid)?.parentId));
+    const newFolderIds = [];
+    for (const fid of topFolders) {
+      const res = fm.duplicateFolder(fid, { undo: false, refresh: false });
+      if (!res) continue;
+      newFolderIds.push(res.folder.id);
+      const fr = fm.getFrameNode(res.folder.id);
+      if (fr) this.selectedIds.add(fr.id);
+      else for (const n of res.nodes) this.selectedIds.add(n.id);
+    }
 
     for (const orig of selected) {
+      // Já copiado junto com a pasta
+      if (fm.isFolderFrame(orig) || insideSelected(fm.containerOf(orig))) continue;
       const cloneCfg = JSON.parse(JSON.stringify(orig));
       delete cloneCfg.id;
       // A cópia mora na mesma pasta, mas um frame copiado vira frame comum
@@ -815,6 +879,10 @@ export class NodesManager {
       cloneCfg.zIndex = ++this.nextZIndex;
       const created = this.createNode(cloneCfg, false);
       this.selectedIds.add(created.id);
+    }
+    if (topFolders.length) {
+      fm.afterChange();
+      if (newFolderIds.length === 1) this.app.projectPanel?.revealFolder(newFolderIds[0]);
     }
     this.syncSelectionClasses();
     this.app.updateContextBar();
