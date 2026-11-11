@@ -66,7 +66,7 @@ export class StorageManager {
   // silent: mudança que não precisa ir para o disco (ex.: mover a câmera)
   scheduleAutoSave({ silent = false } = {}) {
     if (!silent && !this.app.isLoading) this.app.projectFs?.markDirty();
-    if (!this.app.isLoading) this.app.projectPanel?.scheduleRender();
+    if (!silent && !this.app.isLoading) this.app.projectPanel?.scheduleRender();
     if (this.saveTimer) clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => {
       this.saveCurrentBoard();
@@ -167,13 +167,14 @@ export class StorageManager {
   async exportProjectFile() {
     const data = this.serializeBoard();
     // Vídeos vão embutidos no arquivo único (base64) para o .mirogrs abrir em outro PC
-    const vids = data.nodes.filter((n) => n.type === 'video' && n.mediaId);
+    const vids = data.nodes.filter((n) => ['video', 'audio', 'image'].includes(n.type) && n.mediaId);
     if (vids.length) this.app.setStatus('Embutindo vídeos no arquivo .mirogrs...');
     data.nodes = await Promise.all(
       data.nodes.map(async (n) => {
-        if (n.type !== 'video' || !n.mediaId) return n;
+        if (!['video', 'audio', 'image'].includes(n.type) || !n.mediaId) return n;
         const blob = await this.media.getBlob(n.mediaId);
-        return blob ? { ...n, mediaData: await blobToDataUrl(blob) } : n;
+        if (!blob) throw new Error(`Arquivo original não encontrado: ${n.title || n.id}`);
+        return { ...n, mediaData: await blobToDataUrl(blob) };
       })
     );
     const json = JSON.stringify(data, null, 2);
@@ -198,7 +199,7 @@ export class StorageManager {
       // Vídeos embutidos voltam para o MediaStore
       for (const n of data.nodes) {
         if (n.mediaData) {
-          n.mediaId = await this.media.put(await dataUrlToBlob(n.mediaData), n.mediaId || undefined);
+          n.mediaId = await this.media.put(await dataUrlToBlob(n.mediaData), undefined, { required: true });
           delete n.mediaData;
         }
       }
@@ -308,7 +309,9 @@ export class StorageManager {
       if (n.rotation) ctx.rotate((n.rotation * Math.PI) / 180);
       ctx.translate(-n.width / 2, -n.height / 2);
 
-      if (n.type === 'image' && n.src) {
+      if (n.type === 'image' && (n.src || n.mediaId)) {
+        const original = n.mediaId ? await this.media.getBlob(n.mediaId) : null;
+        const imageUrl = original ? URL.createObjectURL(original) : n.src;
         await new Promise((res) => {
           const img = new Image();
           img.crossOrigin = 'anonymous';
@@ -323,8 +326,9 @@ export class StorageManager {
             res();
           };
           img.onerror = () => res();
-          img.src = n.src;
+          img.src = imageUrl;
         });
+        if (original) URL.revokeObjectURL(imageUrl);
       } else if (n.type === 'video') {
         // Vídeo: quadro atual do player (se já carregou)
         ctx.fillStyle = '#000';

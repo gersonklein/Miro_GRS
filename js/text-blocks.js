@@ -813,7 +813,7 @@ export class TextBlocksManager {
     this.updateFallback(node, el);
 
     this.load().then((ok) => {
-      if (ok && this.app.state.nodes.get(node.id) === node) this.createWorkspace(node);
+      if (ok && el.isConnected && this.app.state.nodes.get(node.id) === node) this.createWorkspace(node);
     });
   }
 

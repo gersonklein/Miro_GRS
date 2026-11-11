@@ -1,11 +1,20 @@
 // js/audio-engine.js
 // Estúdio de Áudio no Canvas: Waveform, Player com Loop/Pitch, Gravador de Microfone e Marcadores de Tempo Conectáveis
 
+import { readPcmWavInfo } from './performance.js';
+
 export class AudioEngine {
   constructor(app) {
     this.app = app;
     this.audioCtx = null;
     this.activePlayers = new Map(); // nodeId -> { audioEl, rafId }
+    this.proxyCache = new Map();
+    this.playRequest = 0;
+    this.proxyBytes = 0;
+    this.proxyBudget = 32 * 1024 * 1024;
+    this.proxyJobs = new Map();
+    this.proxyQueue = Promise.resolve();
+    this.transientUrls = new Set();
 
     // Estado do Gravador de Microfone
     this.mediaRecorder = null;
@@ -68,7 +77,7 @@ export class AudioEngine {
     const h = canvas.height;
     ctx.clearRect(0, 0, w, h);
 
-    const list = peaks.length > 0 ? peaks : Array.from({ length: 64 }, (_, i) => 0.3 + 0.5 * Math.abs(Math.sin(i * 0.3)));
+    const list = peaks.length > 0 ? peaks : Array(64).fill(0.06);
     const barCount = list.length;
     const gap = 2;
     const barWidth = Math.max(2, (w - (barCount - 1) * gap) / barCount);
@@ -113,6 +122,9 @@ export class AudioEngine {
     const playBtn = el.querySelector('.audio-play-btn');
     const timeBadge = el.querySelector('.audio-time-badge');
     const loopBtn = el.querySelector('.audio-loop-btn');
+    const editBtn = el.querySelector('.audio-edit-btn');
+    editBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+    editBtn.addEventListener('click', (e) => { e.stopPropagation(); this.editAudio(nodeData); });
     const pinBtn = el.querySelector('.audio-add-pin-btn');
     const speedSelect = el.querySelector('.audio-speed-select');
     const volSlider = el.querySelector('.audio-vol-slider');
@@ -120,8 +132,8 @@ export class AudioEngine {
 
     let playerObj = this.activePlayers.get(nodeData.id);
     if (!playerObj) {
-      const audioEl = new Audio(nodeData.src);
-      audioEl.preload = 'metadata';
+      const audioEl = new Audio();
+      audioEl.preload = 'none';
       audioEl.loop = !!nodeData.loop;
       audioEl.playbackRate = nodeData.playbackRate || 1;
       audioEl.volume = nodeData.volume ?? 0.9;
@@ -149,7 +161,13 @@ export class AudioEngine {
       }
     };
 
-    audioEl.onloadedmetadata = () => updateVisuals();
+    audioEl.onloadedmetadata = () => {
+      if (playerObj.pendingSeek != null) {
+        audioEl.currentTime = Math.min(playerObj.pendingSeek, audioEl.duration || playerObj.pendingSeek);
+        playerObj.pendingSeek = null;
+      }
+      updateVisuals();
+    };
     audioEl.onplay = () => {
       playBtn.textContent = '⏸';
       tick();
@@ -166,11 +184,30 @@ export class AudioEngine {
     };
 
     playBtn.addEventListener('mousedown', (e) => e.stopPropagation());
-    playBtn.addEventListener('click', (e) => {
+    playBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
       if (audioEl.paused) {
-        audioEl.play().catch(() => {});
+        const request = ++this.playRequest;
+        try {
+          for (const other of this.activePlayers.values()) {
+            if (other !== playerObj && other.audioEl.src) this.releasePlayerSource(other);
+          }
+          if (!audioEl.src) {
+            playBtn.disabled = true;
+            const url = await this.audioPlaybackUrl(nodeData);
+            if (!url || !el.isConnected || request !== this.playRequest) {
+              if (this.transientUrls.delete(url)) URL.revokeObjectURL(url);
+              return;
+            }
+            audioEl.src = url;
+          }
+          if (request !== this.playRequest) return;
+          await audioEl.play();
+        } catch (err) {
+          this.app.setStatus('Não foi possível reproduzir o áudio: ' + (err.message || err));
+        } finally { playBtn.disabled = false; }
       } else {
+        ++this.playRequest;
         audioEl.pause();
       }
     });
@@ -226,6 +263,146 @@ export class AudioEngine {
     updateVisuals();
   }
 
+  async originalAudioBlob(node) {
+    if (node.mediaId) {
+      const blob = await this.app.storage.media.getBlob(node.mediaId);
+      if (!blob) throw new Error('Arquivo original não encontrado.');
+      return blob;
+    }
+    const response = await fetch(node.src);
+    if (!response.ok) throw new Error('Não foi possível ler o áudio.');
+    return response.blob();
+  }
+
+  releasePlayerSource(player) {
+    const audio = player.audioEl;
+    player.pendingSeek = audio.currentTime || player.pendingSeek || 0;
+    audio.pause();
+    if (this.transientUrls.delete(audio.src)) URL.revokeObjectURL(audio.src);
+    audio.removeAttribute('src');
+    audio.load();
+  }
+
+  async audioPlaybackUrl(node) {
+    const key = node.mediaId || node.id;
+    const hit = this.proxyCache.get(key);
+    if (hit) {
+      this.proxyCache.delete(key);
+      this.proxyCache.set(key, hit);
+      return hit.url;
+    }
+    if (this.proxyJobs.has(key)) return this.proxyJobs.get(key);
+    const job = this.proxyQueue.then(() => this.preparePlayback(node, key));
+    this.proxyQueue = job.catch(() => {});
+    this.proxyJobs.set(key, job);
+    try { return await job; } finally { this.proxyJobs.delete(key); }
+  }
+
+  async preparePlayback(node, key) {
+    const original = await this.originalAudioBlob(node);
+    if (node.mediaId) this.app.storage.media.release(node.mediaId);
+    let proxy = null;
+    // MP3/AAC/Opus are already compressed: never decode them just to try a proxy.
+    const wav = /wav|wave/i.test(original.type) || /\.wav$/i.test(node.title || '');
+    const info = wav ? readPcmWavInfo(await original.slice(0, 65536).arrayBuffer()) : null;
+    if (info) node.duration = info.duration;
+    if (info && info.duration <= 120 && original.size <= 16 * 1024 * 1024 && typeof Worker !== 'undefined') {
+      try {
+        const decoded = await this.getAudioContext().decodeAudioData(await original.arrayBuffer());
+        node.duration = decoded.duration;
+        if (decoded.duration <= 120 && decoded.numberOfChannels <= 2) {
+          const tracks = Array.from({ length: decoded.numberOfChannels }, (_, c) => decoded.getChannelData(c).slice());
+          const result = await new Promise((resolve, reject) => {
+            const worker = new Worker(new URL('./audio-proxy-worker.js', import.meta.url));
+            const timer = setTimeout(() => { worker.terminate(); reject(new Error('Tempo limite do proxy')); }, 30000);
+            const finish = () => { clearTimeout(timer); worker.terminate(); };
+            worker.onmessage = ({ data }) => { finish(); data.error ? reject(new Error(data.error)) : resolve(data); };
+            worker.onerror = e => { finish(); reject(new Error(e.message)); };
+            worker.postMessage({ tracks, sampleRate: decoded.sampleRate, duration: decoded.duration }, tracks.map(t => t.buffer));
+          });
+          node.peaks = result.peaks;
+          const candidate = new Blob([result.bytes], { type: 'audio/wav' });
+          if (candidate.size < original.size) proxy = candidate;
+          this.app.storage.scheduleAutoSave();
+        }
+      } catch (err) { console.warn('Usando original; proxy indisponível.', err); }
+    }
+    const url = URL.createObjectURL(proxy || original);
+    if (!proxy) { this.transientUrls.add(url); return url; }
+    this.proxyCache.set(key, { url, size: proxy.size });
+    this.proxyBytes += proxy.size;
+    for (const [oldKey, entry] of this.proxyCache) {
+      if (this.proxyBytes <= this.proxyBudget) break;
+      if (oldKey === key) continue;
+      if ([...this.activePlayers.values()].some(p => p.audioEl.src === entry.url && !p.audioEl.paused)) continue;
+      for (const p of this.activePlayers.values()) if (p.audioEl.src === entry.url) this.releasePlayerSource(p);
+      URL.revokeObjectURL(entry.url);
+      this.proxyBytes -= entry.size;
+      this.proxyCache.delete(oldKey);
+    }
+    return url;
+  }
+
+  async editAudio(node) {
+    const answers = [];
+    for (const [label, value] of [
+      ['Início do corte em segundos:', '0'],
+      ['Fim do corte em segundos:', node.peaks?.length ? String(node.duration || '') : ''],
+      ['Fade de entrada em segundos:', '0'],
+      ['Fade de saída em segundos:', '0']
+    ]) {
+      const answer = prompt(label, value);
+      if (answer === null) return;
+      answers.push(Number(answer.replace(',', '.')));
+    }
+    const [start, end, fadeIn, fadeOut] = answers;
+    if (answers.some(v => !Number.isFinite(v) || v < 0) || end <= start || fadeIn + fadeOut > end - start) {
+      alert('Informe tempos válidos para o corte e os fades.');
+      return;
+    }
+    try {
+      this.app.setStatus('Processando áudio editado...');
+      const original = await this.originalAudioBlob(node);
+      if (node.mediaId) this.app.storage.media.release(node.mediaId);
+      const source = await this.getAudioContext().decodeAudioData(await original.arrayBuffer());
+      if (end > source.duration + 0.001) throw new Error('O fim ultrapassa a duração do áudio.');
+      const first = Math.floor(start * source.sampleRate);
+      const length = Math.min(source.length - first, Math.floor((end - start) * source.sampleRate));
+      if (length < 1) throw new Error('O trecho selecionado está vazio.');
+      const channels = source.numberOfChannels;
+      const bytes = new ArrayBuffer(44 + length * channels * 2);
+      const view = new DataView(bytes);
+      const write = (offset, value) => { for (let i = 0; i < value.length; i++) view.setUint8(offset + i, value.charCodeAt(i)); };
+      write(0, 'RIFF'); view.setUint32(4, bytes.byteLength - 8, true); write(8, 'WAVE'); write(12, 'fmt ');
+      view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, channels, true);
+      view.setUint32(24, source.sampleRate, true); view.setUint32(28, source.sampleRate * channels * 2, true);
+      view.setUint16(32, channels * 2, true); view.setUint16(34, 16, true); write(36, 'data'); view.setUint32(40, bytes.byteLength - 44, true);
+      const tracks = Array.from({ length: channels }, (_, c) => source.getChannelData(c));
+      for (let i = 0; i < length; i++) {
+        const t = i / source.sampleRate, remaining = (length - 1 - i) / source.sampleRate;
+        const gain = Math.min(1, fadeIn ? t / fadeIn : 1, fadeOut ? remaining / fadeOut : 1);
+        for (let c = 0; c < channels; c++) {
+          const sample = Math.max(-1, Math.min(1, tracks[c][first + i] * gain));
+          view.setInt16(44 + (i * channels + c) * 2, sample < 0 ? sample * 32768 : sample * 32767, true);
+        }
+      }
+      const editedBlob = new Blob([bytes], { type: 'audio/wav' });
+      this.app.pushUndoState();
+      const fm = this.app.foldersManager;
+      const parent = node.folderId || null;
+      let folder = fm.getChildren(parent).find(f => f.name.toLocaleLowerCase('pt-BR') === 'editado');
+      if (!folder) folder = fm.createFolder('Editado', parent, { undo: false, withFrame: false, refresh: false });
+      const title = (node.title || 'Som').replace(/\.[^.]+$/, '') + ' - editado.wav';
+      const edited = await this.app.nodesManager.createAudioNodeFromBlob(editedBlob, title, node.x + 30, node.y + node.height + 30, [], { undo: false });
+      edited.folderId = folder.id;
+      fm.afterChange({ refit: false });
+      this.app.storage.scheduleAutoSave();
+      this.app.setStatus('Áudio criado na pasta Editado. Salve o projeto para gravá-lo no computador.');
+    } catch (err) {
+      alert('Não foi possível editar o áudio: ' + (err.message || err));
+    }
+  }
+
   renderAudioMarkers(nodeData, markersTrack, audioEl, updateVisuals) {
     if (!markersTrack) return;
     markersTrack.innerHTML = '';
@@ -266,9 +443,15 @@ export class AudioEngine {
           return;
         }
         e.stopPropagation();
-        audioEl.currentTime = marker.time;
-        updateVisuals();
-        audioEl.play().catch(() => {});
+        if (!audioEl.src) {
+          const player = this.activePlayers.get(nodeData.id);
+          if (player) player.pendingSeek = marker.time;
+          markersTrack.closest('.canvas-node')?.querySelector('.audio-play-btn')?.click();
+        } else {
+          audioEl.currentTime = marker.time;
+          updateVisuals();
+          audioEl.play().catch(() => {});
+        }
       });
 
       // Duplo clique no marcador permite renomear ou remover
@@ -323,7 +506,7 @@ export class AudioEngine {
   stopAndCleanupNode(nodeId) {
     const playerObj = this.activePlayers.get(nodeId);
     if (playerObj) {
-      playerObj.audioEl.pause();
+      this.releasePlayerSource(playerObj);
       if (playerObj.rafId) cancelAnimationFrame(playerObj.rafId);
       this.activePlayers.delete(nodeId);
     }

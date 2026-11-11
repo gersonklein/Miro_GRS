@@ -1,3 +1,4 @@
+import { SharedHistory } from './performance.js';
 // js/app.js
 // Orquestrador Principal Miro_GRS: Ferramentas, Eventos Globais, Undo/Redo, Drag & Drop, Paste e Quadro Demo
 
@@ -25,6 +26,7 @@ class MiroGRSApp {
 
     this.undoStack = [];
     this.redoStack = [];
+    this.history = new SharedHistory();
     this.maxHistory = 35;
 
     this.currentTool = 'select'; // 'select' | 'pan' | 'sticky' | 'text' | 'shape' | 'connect' | 'pen' | 'highlighter' | 'eraser' | 'eyedropper'
@@ -44,7 +46,7 @@ class MiroGRSApp {
     this.nodesManager = new NodesManager(this);
     this.projectPanel = new ProjectPanel(this);
 
-    this.init();
+    this.ready = this.init();
   }
 
   async init() {
@@ -90,6 +92,7 @@ class MiroGRSApp {
     this.storage.setCurrentProjectId(data.id || 'proj_' + Date.now().toString(36));
     this.undoStack = [];
     this.redoStack = [];
+    this.history = new SharedHistory();
     this.foldersManager.isolateId = null;
     this.projectPanel.selectedId = null;
     this.projectPanel.focusRootId = null;
@@ -197,6 +200,7 @@ class MiroGRSApp {
 
   setTool(toolName) {
     this.currentTool = toolName;
+    this.nodesManager.refreshVisible();
     document.querySelectorAll('#left-toolbar .tool-btn[data-tool]').forEach((btn) => {
       btn.classList.toggle('active', btn.dataset.tool === toolName);
     });
@@ -231,7 +235,8 @@ class MiroGRSApp {
 
   // HISTÓRICO UNDO / REDO
   pushUndoState() {
-    const snapshot = JSON.stringify(this.storage.serializeBoard());
+    this.history ||= new SharedHistory();
+    const snapshot = this.history.capture(this.storage.serializeBoard());
     this.undoStack.push(snapshot);
     if (this.undoStack.length > this.maxHistory) this.undoStack.shift();
     this.redoStack = [];
@@ -242,10 +247,10 @@ class MiroGRSApp {
       this.setStatus('Nada para desfazer.');
       return;
     }
-    const currentSnap = JSON.stringify(this.storage.serializeBoard());
+    const currentSnap = this.history.capture(this.storage.serializeBoard());
     this.redoStack.push(currentSnap);
     const prevSnap = this.undoStack.pop();
-    await this.loadBoardData(JSON.parse(prevSnap), false);
+    await this.loadBoardData(this.history.restore(prevSnap), false);
     this.storage.scheduleAutoSave();
     this.setStatus('Ação desfeita (Undo).');
   }
@@ -255,10 +260,10 @@ class MiroGRSApp {
       this.setStatus('Nada para refazer.');
       return;
     }
-    const currentSnap = JSON.stringify(this.storage.serializeBoard());
+    const currentSnap = this.history.capture(this.storage.serializeBoard());
     this.undoStack.push(currentSnap);
     const nextSnap = this.redoStack.pop();
-    await this.loadBoardData(JSON.parse(nextSnap), false);
+    await this.loadBoardData(this.history.restore(nextSnap), false);
     this.storage.scheduleAutoSave();
     this.setStatus('Ação refeita (Redo).');
   }
@@ -274,7 +279,13 @@ class MiroGRSApp {
     this.state.nodes.clear();
     this.state.connections.clear();
     this.state.drawings.clear();
+    for (const el of this.nodesManager.mounted.values()) {
+      this.nodesManager.previews.release(el.querySelector('img'));
+      const video = el.querySelector('video');
+      if (video) { video.pause(); video.removeAttribute('src'); video.load(); if (video.ownedUrl) URL.revokeObjectURL(video.ownedUrl); }
+    }
     this.nodesManager.nodesLayer.innerHTML = '';
+    this.nodesManager.mounted.clear();
     this.nodesManager.selectedIds.clear();
     // Pastas antes dos nós (as tags/badges dependem delas). Projetos antigos: sem pastas.
     this.foldersManager.load(data.folders || []);
@@ -312,6 +323,7 @@ class MiroGRSApp {
     this.canvasEngine.renderMinimap();
     this.foldersManager.decorateAll();
     this.isLoading = false;
+    this.nodesManager.refreshVisible();
     this.updateContextBar();
     this.projectPanel?.render();
 

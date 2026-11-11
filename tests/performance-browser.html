@@ -1,0 +1,73 @@
+<!doctype html><meta charset="utf-8"><title>Performance regression tests</title>
+<pre id="result">RUNNING</pre><img src="/test-hold" hidden><iframe src="/index.html" style="width:1200px;height:800px"></iframe>
+<script type="module">
+const output = document.getElementById('result');
+const frame = document.querySelector('iframe');
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const check = (condition, message) => { if (!condition) throw new Error(message); };
+try {
+  for (let i = 0; i < 200; i++) {
+    if (frame.contentWindow.miroGRS?.state.nodes.size && !frame.contentWindow.miroGRS.isLoading) break;
+    await sleep(50);
+  }
+  const app = frame.contentWindow.miroGRS;
+  check(app, 'App did not start');
+  await app.ready;
+  app.storage.scheduleAutoSave = () => {};
+  const nodes = Array.from({ length: 5000 }, (_, i) => ({
+    id: 'test' + i, type: 'sticky', title: 'Nota ' + i, text: 'Texto ' + i,
+    x: (i % 100) * 280, y: Math.floor(i / 100) * 220, width: 200, height: 160,
+    folderId: 'folder' + (i % 100)
+  }));
+  const folders = Array.from({ length: 100 }, (_, i) => ({ id: 'folder' + i, name: 'Pasta ' + i }));
+  const start = performance.now();
+  await app.loadBoardData({ nodes, folders, connections: [{ id: 'conn', from: 'test0', to: 'test1', label: 'Ligação' }], drawings: [], camera: { panX: 0, panY: 0, scale: 1 } });
+  await sleep(100);
+  const mounted = app.nodesManager.mounted.size;
+  check(mounted > 0 && mounted < 200, 'Viewport culling failed: ' + mounted);
+  const elapsed = performance.now() - start;
+  app.pushUndoState();
+  app.state.nodes.get('test0').text = 'Alterado';
+  await app.undo();
+  check(app.state.nodes.get('test0').text === 'Texto 0', 'Undo failed');
+  await app.redo();
+  check(app.state.nodes.get('test0').text === 'Alterado', 'Redo failed');
+  const group = app.connectionsDrawing.connectionElements.get('conn');
+  const fullRender = app.connectionsDrawing.renderAllConnections.bind(app.connectionsDrawing);
+  const fullRenderCalls = [];
+  app.connectionsDrawing.renderAllConnections = (...args) => { fullRenderCalls.push(new Error().stack); return fullRender(...args); };
+  const before = group.querySelector('path').getAttribute('d');
+  app.state.nodes.get('test0').x += 100;
+  app.connectionsDrawing.scheduleNodeConnections([app.state.nodes.get('test0')]);
+  await sleep(100);
+  check(group === app.connectionsDrawing.connectionElements.get('conn'), 'Connection DOM was recreated: ' + fullRenderCalls.join('\n'));
+  check(before !== group.querySelector('path').getAttribute('d'), 'Connection geometry did not update');
+  app.canvasEngine.centerOn(20000, 5000, 1);
+  await sleep(100);
+  check(!app.nodesManager.mounted.has('test0'), 'Offscreen node not released');
+  check(app.nodesManager.mounted.size < 200, 'Pan culling failed');
+  app.canvasEngine.setZoom(0.1);
+  await sleep(100);
+  check([...app.nodesManager.mounted.values()].some(el => el.dataset.overview), 'Overview mode missing');
+  const canvas = document.createElement('canvas'); canvas.width = 2048; canvas.height = 1024;
+  canvas.getContext('2d').fillRect(0, 0, 2048, 1024);
+  const imageBlob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+  const image = await app.nodesManager.createImageNodeFromBlob(imageBlob, 'teste.png', 20000, 5000);
+  check(image.mediaId && !image.src, 'Image original is still embedded in board');
+  const wav = await (await fetch(app.audioEngine.generateDemoWavDataUrl())).blob();
+  const audio = await app.nodesManager.createAudioNodeFromBlob(wav, 'teste.wav', 20400, 5000);
+  const proxyUrl = await app.audioEngine.audioPlaybackUrl(audio);
+  const proxy = await (await fetch(proxyUrl)).blob();
+  check(proxy.size < wav.size, 'WAV proxy was not generated');
+  const original = await app.storage.media.getBlob(audio.mediaId);
+  const actual = new Uint8Array(await original.arrayBuffer());
+  const expected = new Uint8Array(await wav.arrayBuffer());
+  check(actual.length === expected.length && actual.every((v, i) => v === expected[i]), 'Original audio changed');
+  const { buildDiskPlan } = await import('/js/project-fs.js');
+  const disk = buildDiskPlan({ nodes: [image, audio], folders: [] }, { getMediaBlob: id => app.storage.media.getBlob(id) });
+  check(disk.files.length === 2, 'Image/audio missing in disk plan');
+  for (const file of disk.files) check((await file.getContent()).size === (file.owner === image.id ? imageBlob.size : wav.size), 'Disk exports a proxy');
+  output.textContent = 'PASS ' + JSON.stringify({ nodes: 5000, folders: 100, mounted, loadAndPanelMs: Math.round(elapsed), tests: ['culling', 'undo', 'redo', 'partial connections', 'pan', 'overview', 'binary image', 'audio worker', 'original bytes', 'disk plan'] });
+} catch (error) { output.textContent = 'FAIL ' + error.stack; }
+await fetch('/test-finish');
+</script>

@@ -1,3 +1,4 @@
+import { indexFolders, nameCollator } from './performance.js';
 // js/project-panel.js
 // Painel "Project" estilo Unity: árvore de pastas recursiva (níveis ilimitados) com os
 // arquivos (imagens, sons, vídeos, textos...) dentro de cada pasta, breadcrumb, busca,
@@ -117,15 +118,16 @@ export class ProjectPanel {
 
   sortedItems(folderId) {
     const nm = this.nm;
-    return this.fm.itemsInFolder(folderId, false).sort((a, b) => {
+    return [...(this.renderIndex?.items.get(folderId || null) || this.fm.itemsInFolder(folderId, false))].sort((a, b) => {
       const ta = TYPE_ORDER.indexOf(a.type);
       const tb = TYPE_ORDER.indexOf(b.type);
       if (ta !== tb) return ta - tb;
-      return nm.getDisplayName(a).localeCompare(nm.getDisplayName(b), 'pt-BR', { numeric: true, sensitivity: 'base' });
+      return nameCollator.compare(nm.getDisplayName(a), nm.getDisplayName(b));
     });
   }
 
   render() {
+    this.renderIndex = indexFolders(this.app.state.nodes, this.fm.folders);
     if (this.selectedId && this.selectedId !== UNSORTED && !this.fm.get(this.selectedId)) this.selectedId = null;
     if (this.focusRootId && !this.fm.get(this.focusRootId)) this.focusRootId = null;
     if (this.selectedItemId && !this.app.state.nodes.has(this.selectedItemId)) this.selectedItemId = null;
@@ -152,8 +154,7 @@ export class ProjectPanel {
       }
     }
 
-    const tree = this.treeEl;
-    tree.innerHTML = '';
+    const tree = document.createDocumentFragment();
 
     // Linha raiz (projeto ou pasta focada)
     const rootLabel = this.focusRootId
@@ -164,7 +165,7 @@ export class ProjectPanel {
       name: rootLabel,
       depth: 0,
       isRoot: true,
-      count: this.focusRootId ? this.fm.countItems(this.focusRootId, true) : this.app.state.nodes.size
+      count: this.focusRootId ? (this.renderIndex.totals.get(this.focusRootId) || 0) : this.app.state.nodes.size
     });
     tree.appendChild(rootRow);
 
@@ -176,10 +177,10 @@ export class ProjectPanel {
     };
 
     const renderLevel = (parentId, depth) => {
-      for (const f of this.fm.getChildren(parentId)) {
+      for (const f of (this.renderIndex.children.get(parentId || null) || [])) {
         if (visible && !visible.has(f.id)) continue;
-        const kids = this.fm.getChildren(f.id);
-        const nItems = this.fm.itemsInFolder(f.id, false).length;
+        const kids = (this.renderIndex.children.get(f.id) || []);
+        const nItems = (this.renderIndex.items.get(f.id)?.length || 0);
         const open = !f.collapsed || !!visible;
         const row = this.buildRow({
           id: f.id,
@@ -188,7 +189,7 @@ export class ProjectPanel {
           hasChildren: kids.length > 0 || nItems > 0,
           collapsed: f.collapsed && !visible,
           color: this.fm.getColor(f.id),
-          count: this.fm.countItems(f.id, true),
+          count: (this.renderIndex.totals.get(f.id) || 0),
           match: q && f.name.toLowerCase().includes(q)
         });
         tree.appendChild(row);
@@ -202,7 +203,7 @@ export class ProjectPanel {
     if (this.focusRootId) renderItems(this.focusRootId, 1);
 
     if (!this.focusRootId && (!q || unsortedHasMatch)) {
-      const unsorted = this.fm.itemsInFolder(null, false).length;
+      const unsorted = (this.renderIndex.items.get(null)?.length || 0);
       const open = !this.unsortedCollapsed || !!q;
       tree.appendChild(
         this.buildRow({
@@ -219,6 +220,7 @@ export class ProjectPanel {
       if (open) renderItems(null, 2);
     }
 
+    this.treeEl.replaceChildren(tree);
     this.renderBreadcrumb();
     const linked = this.app.projectFs?.dirName();
     this.statsEl.textContent = `${this.fm.folders.size} pasta(s) · ${this.app.state.nodes.size} item(ns) · ${

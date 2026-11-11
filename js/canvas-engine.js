@@ -88,9 +88,13 @@ export class CanvasEngine {
     if (readout) {
       readout.textContent = `${Math.round(this.scale * 100)}%`;
     }
-    this.renderGrid();
-    this.renderMinimap();
-    this.app.textBlocks?.syncAll();
+    if (!this.transformFrame) this.transformFrame = requestAnimationFrame(() => {
+      this.transformFrame = null;
+      this.renderGrid();
+      this.renderMinimap();
+      this.app.nodesManager?.refreshVisible();
+      this.app.textBlocks?.syncAll();
+    });
   }
 
   zoomAt(clientX, clientY, zoomFactor) {
@@ -225,6 +229,14 @@ export class CanvasEngine {
   }
 
   renderMinimap() {
+    if (this.minimapFrame) return;
+    this.minimapFrame = requestAnimationFrame(() => {
+      this.minimapFrame = null;
+      this.drawMinimap();
+    });
+  }
+
+  drawMinimap() {
     if (!this.app || !this.app.state) return;
     const ctx = this.minimapCtx;
     const mw = this.minimapCanvas.width;

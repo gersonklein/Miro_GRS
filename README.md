@@ -42,3 +42,17 @@ O projeto já está configurado com `netlify.toml`, `vercel.json` e GitHub Actio
 
 ### Opção 3: Vercel
 1. Execute `npx vercel` dentro da pasta `Miro_GRS` e siga as instruções no terminal.
+
+## Desempenho em projetos grandes
+
+- O canvas monta cards próximos da tela, mantendo itens selecionados e mídia em reprodução. Em zoom abaixo de 20%, quadros com mais de 300 itens usam representações simples dos cards não selecionados.
+- Imagens e áudios novos ficam como Blobs no IndexedDB; o estado e o histórico guardam referências. Projetos antigos com fontes em base64 continuam abrindo. Miniaturas de imagem têm até 1024 pixels e cache de 24 MiB; seleção, zoom de detalhe e conta-gotas usam a imagem original.
+- O painel monta um índice de itens por pasta por atualização. Conexões de itens arrastados são atualizadas sem reconstruir todos os elementos SVG.
+- Desfazer/Refazer compartilha registros inalterados entre versões e mantém as mídias necessárias ao histórico. Importar vários arquivos cria uma entrada de histórico por lote.
+- Proxies de áudio são preparados em fila, com conversão PCM em Worker e cache de 32 MiB. Apenas WAV PCM reconhecido, de até 16 MiB, 120 segundos e dois canais é candidato. Formatos já comprimidos ou não elegíveis usam o original sem decodificação para tentar um proxy. A versão leve é mono a 12 kHz e só é usada se menor. Os originais são usados nas edições, exportações e pastas do projeto.
+- O limite de cache não é um limite da memória total: mídia ativa, decodificação e edições ainda precisam de memória proporcional ao arquivo. Exportar um arquivo único .mirogrs também embute os originais.
+
+### Verificação
+
+Testes lógicos: `node --experimental-vm-modules tests/performance.test.mjs`.
+Com um servidor local ativo, abra `/tests/performance-browser.html` em um perfil de navegador separado: o teste substitui o quadro desse perfil por um cenário sintético de 5000 cards e verifica navegação, histórico, conexões, imagens, proxies e exportação dos originais.

@@ -1,3 +1,4 @@
+import { ImagePreviews } from './image-previews.js';
 // js/nodes-manager.js
 // Gerenciador de Nós do Canvas: Imagens PureRef, Cards de Áudio, Post-its, Formas, Textos e Swatches
 
@@ -10,6 +11,8 @@ export class NodesManager {
     this.nodesLayer = document.getElementById('nodes-layer');
     this.selectedIds = new Set();
     this.nextZIndex = 10;
+    this.mounted = new Map();
+    this.previews = new ImagePreviews(app.storage.media);
   }
 
   getSelectedNodes() {
@@ -19,6 +22,73 @@ export class NodesManager {
       if (n) res.push(n);
     }
     return res;
+  }
+
+  isNearViewport(n) {
+    const ce = this.app.canvasEngine;
+    const a = ce.screenToWorld(-350, -350);
+    const b = ce.screenToWorld(window.innerWidth + 350, window.innerHeight + 350);
+    // Circumscribed square also covers rotated cards.
+    const radius = Math.hypot(n.width, n.height) / 2;
+    const x = n.x + n.width / 2, y = n.y + n.height / 2;
+    return x + radius >= a.x && x - radius <= b.x && y + radius >= a.y && y - radius <= b.y;
+  }
+
+  mountNode(n) {
+    if (this.mounted.has(n.id)) return this.mounted.get(n.id);
+    const overview = this.useOverview(n);
+    const el = overview ? document.createElement('div') : this.buildNodeDOM(n);
+    if (overview) {
+      el.className = `canvas-node node-${n.type} node-overview`;
+      el.dataset.id = n.id;
+      el.dataset.overview = '1';
+      el.title = this.getDisplayName(n);
+      el.style.background = n.fill || '#334155';
+      this.bindNodeInteractions(n, el);
+    }
+    this.mounted.set(n.id, el);
+    this.nodesLayer.appendChild(el);
+    this.updateNodeElementTransform(n, el);
+    if (n.type === 'image' && !overview) this.previews.display(n, el.querySelector('img'), this.selectedIds.has(n.id));
+    el.classList.toggle('selected', this.selectedIds.has(n.id));
+    return el;
+  }
+
+  useOverview(n) {
+    return this.app.state.nodes.size > 300 && this.app.canvasEngine.scale < 0.2 &&
+      !this.selectedIds.has(n.id) && !this.app.audioEngine.activePlayers.get(n.id)?.audioEl?.src;
+  }
+
+  refreshVisible() {
+    if (this.app.isLoading) return;
+    for (const n of this.app.state.nodes.values()) {
+      let el = this.mounted.get(n.id);
+      const playing = this.app.audioEngine.activePlayers.get(n.id)?.audioEl;
+      const video = el?.querySelector('video');
+      const keep = this.selectedIds.has(n.id) || el?.contains(document.activeElement) ||
+        (playing && !playing.paused) || (video && !video.paused);
+      if (el && !keep && Boolean(el.dataset.overview) !== this.useOverview(n)) {
+        if (n.type === 'textblocks') { this.app.textBlocks.flushAll(); this.app.textBlocks.destroy(n.id); }
+        if (n.type === 'audio') this.app.audioEngine.stopAndCleanupNode(n.id);
+        this.previews.release(el.querySelector('img'));
+        if (video) { video.pause(); video.removeAttribute('src'); video.load(); if (video.ownedUrl) URL.revokeObjectURL(video.ownedUrl); }
+        el.remove(); this.mounted.delete(n.id); el = null;
+      }
+      if (keep || this.isNearViewport(n)) {
+        const mounted = el || this.mountNode(n);
+        if (n.type === 'image' && !mounted.dataset.overview) this.previews.display(n, mounted.querySelector('img'), this.selectedIds.has(n.id) || this.app.currentTool === 'eyedropper' || n.width * this.app.canvasEngine.scale > 1024);
+      } else if (el) {
+        if (n.type === 'textblocks') {
+          this.app.textBlocks.flushAll();
+          this.app.textBlocks.destroy(n.id);
+        }
+        if (n.type === 'audio') this.app.audioEngine.stopAndCleanupNode(n.id);
+        if (video) { video.pause(); video.removeAttribute('src'); video.load(); if (video.ownedUrl) URL.revokeObjectURL(video.ownedUrl); }
+        this.previews.release(el.querySelector('img'));
+        el.remove();
+        this.mounted.delete(n.id);
+      }
+    }
   }
 
   // ---------- Nome / Renomear ----------
@@ -82,6 +152,7 @@ export class NodesManager {
   }
 
   selectNode(id, additive = false) {
+    if (this.importing) return;
     if (!additive) {
       this.selectedIds.clear();
     }
@@ -103,6 +174,7 @@ export class NodesManager {
   }
 
   syncSelectionClasses() {
+    this.refreshVisible();
     const allEls = this.nodesLayer.querySelectorAll('.canvas-node');
     allEls.forEach((el) => {
       const id = el.dataset.id;
@@ -111,12 +183,21 @@ export class NodesManager {
   }
 
   createNode(config, recordUndo = true) {
-    if (recordUndo) this.app.pushUndoState();
+    if (recordUndo && !this.importing) this.app.pushUndoState();
 
     const id = config.id || 'node_' + Date.now() + '_' + Math.floor(Math.random() * 10000);
     const zIndex = config.zIndex || ++this.nextZIndex;
     if (zIndex >= this.nextZIndex) this.nextZIndex = zIndex + 1;
 
+    let defaultTitle = config.title ?? '';
+    if (!config.id && (config.type || 'sticky') === 'sticky' && !defaultTitle) {
+      const used = new Set(Array.from(this.app.state.nodes.values())
+        .filter(n => n.type === 'sticky')
+        .map(n => Number((n.title || '').match(/^Post-it (\d+)$/)?.[1])).filter(Boolean));
+      let number = 1;
+      while (used.has(number)) number++;
+      defaultTitle = `Post-it ${number}`;
+    }
     const nodeData = {
       id,
       type: config.type || 'sticky', // 'sticky' | 'text' | 'shape' | 'image' | 'audio' | 'swatch'
@@ -134,7 +215,7 @@ export class NodesManager {
       locked: !!config.locked,
       zIndex,
       text: config.text ?? '',
-      title: config.title ?? '',
+      title: defaultTitle,
       // Image PureRef properties
       src: config.src || '',
       naturalWidth: config.naturalWidth || 400,
@@ -165,11 +246,9 @@ export class NodesManager {
     };
 
     this.app.state.nodes.set(id, nodeData);
-    const el = this.buildNodeDOM(nodeData);
-    this.nodesLayer.appendChild(el);
-    this.updateNodeElementTransform(nodeData, el);
+    if (!this.app.isLoading && this.isNearViewport(nodeData)) this.mountNode(nodeData);
 
-    this.app.canvasEngine.renderMinimap();
+    if (!this.app.isLoading) this.app.canvasEngine.renderMinimap();
     this.app.storage.scheduleAutoSave();
     return nodeData;
   }
@@ -187,7 +266,7 @@ export class NodesManager {
       edit.innerText = nodeData.text || 'Duplo clique para escrever...';
       const footer = document.createElement('div');
       footer.className = 'sticky-footer';
-      footer.innerHTML = `<span>Post-it</span><span>Miro_GRS</span>`;
+      footer.textContent = nodeData.title || 'Post-it';
       el.appendChild(edit);
       el.appendChild(footer);
       this.bindEditableText(nodeData, el, edit);
@@ -237,7 +316,7 @@ export class NodesManager {
       const viewport = document.createElement('div');
       viewport.className = 'image-viewport';
       const img = document.createElement('img');
-      img.src = nodeData.src;
+      img.decoding = 'async';
       img.alt = nodeData.title || 'Referência PureRef';
       img.draggable = false;
       viewport.appendChild(img);
@@ -271,6 +350,7 @@ export class NodesManager {
         </div>
         <div class="audio-controls-row">
           <button class="audio-play-btn" title="Play / Pause">▶</button>
+          <button class="audio-mini-btn audio-edit-btn" title="Cortar e aplicar fades">✂ Editar</button>
           <button class="audio-mini-btn audio-loop-btn" title="Repetir em Loop">🔁 Loop</button>
           <button class="audio-mini-btn audio-add-pin-btn" title="Criar Marcador de Tempo conectável na onda sonora">📍 + Pin</button>
           <select class="audio-speed-select" title="Velocidade / Pitch do Som">
@@ -420,7 +500,7 @@ export class NodesManager {
           item.node.y = Math.round(item.startY + dy);
           this.updateNodeElementTransform(item.node);
         }
-        this.app.connectionsDrawing.renderAllConnections();
+        this.app.connectionsDrawing.scheduleNodeConnections(movingNodes);
         this.app.canvasEngine.renderMinimap();
 
         // Destaque do destino: pasta no painel Project ou frame no canvas
@@ -508,7 +588,7 @@ export class NodesManager {
           nodeData.height = Math.round(newH);
 
           this.updateNodeElementTransform(nodeData, el);
-          this.app.connectionsDrawing.renderAllConnections();
+          this.app.connectionsDrawing.scheduleNodeConnections([nodeData]);
           this.app.canvasEngine.renderMinimap();
         };
 
@@ -557,7 +637,7 @@ export class NodesManager {
   }
 
   updateNodeElementTransform(nodeData, domEl = null) {
-    const el = domEl || this.nodesLayer.querySelector(`.canvas-node[data-id="${nodeData.id}"]`);
+    const el = domEl || this.mounted.get(nodeData.id);
     if (!el) return;
 
     el.style.left = `${nodeData.x}px`;
@@ -628,7 +708,13 @@ export class NodesManager {
     let offset = 0;
     const created = [];
 
+    if (!files.length) return created;
+    this.app.pushUndoState();
+    this.importing = true;
+    let processed = 0;
+    try {
     for (const file of files) {
+      if (++processed % 12 === 0) await new Promise(resolve => setTimeout(resolve, 0));
       // Vídeo (.mp4, .mov, .webm de vídeo...) → card de vídeo
       if (isVideoFile(file)) {
         created.push(await this.createVideoNodeFromBlob(file, file.name, worldX + offset, worldY + offset));
@@ -659,23 +745,18 @@ export class NodesManager {
         return created;
       }
 
-      const dataUrl = await new Promise((res) => {
-        const reader = new FileReader();
-        reader.onload = () => res(reader.result);
-        reader.readAsDataURL(file);
-      });
-
-      if (file.type.startsWith('image/')) {
-        created.push(await this.createImageNodeFromDataUrl(dataUrl, file.name, worldX + offset, worldY + offset));
-        offset += 34;
-      } else if (
-        file.type.startsWith('audio/') ||
-        /\.(mp3|wav|ogg|m4a|webm|flac)$/i.test(file.name)
-      ) {
-        created.push(await this.createAudioNodeFromDataUrl(dataUrl, file.name, worldX + offset, worldY + offset));
+      if (file.type.startsWith('audio/') || /\.(mp3|wav|ogg|m4a|flac|aac)$/i.test(file.name)) {
+        created.push(await this.createAudioNodeFromBlob(file, file.name, worldX + offset, worldY + offset));
         offset += 40;
+        continue;
+      }
+      if (file.type.startsWith('image/')) {
+        created.push(await this.createImageNodeFromBlob(file, file.name, worldX + offset, worldY + offset));
+        offset += 34;
       }
     }
+    } finally { this.importing = false; }
+    this.refreshVisible();
     // Arquivos soltos em cima de um frame já entram naquela pasta
     if (autoAssign && created.length) this.app.foldersManager.autoAssign(created);
     return created;
@@ -694,6 +775,14 @@ export class NodesManager {
   }
 
   async createImageNodeFromDataUrl(dataUrl, title = 'Imagem', x = 200, y = 200, { select = true, undo = true } = {}) {
+    const blob = await (await fetch(dataUrl)).blob();
+    return this.createImageNodeFromBlob(blob, title, x, y, { select, undo });
+  }
+
+  async createImageNodeFromBlob(blob, title = 'Imagem', x = 200, y = 200, { select = true, undo = true } = {}) {
+    const mediaId = await this.app.storage.media.put(blob, undefined, { required: true });
+    this.app.storage.media.release(mediaId);
+    const dataUrl = URL.createObjectURL(blob);
     const dims = await new Promise((resolve) => {
       const img = new Image();
       img.onload = () => resolve({ w: img.naturalWidth || 400, h: img.naturalHeight || 300 });
@@ -701,6 +790,7 @@ export class NodesManager {
       img.src = dataUrl;
     });
 
+    URL.revokeObjectURL(dataUrl);
     const maxSide = 360;
     const scale = Math.min(1, maxSide / Math.max(dims.w, dims.h));
     const width = Math.max(80, Math.round(dims.w * scale));
@@ -709,7 +799,8 @@ export class NodesManager {
     const node = this.createNode({
       type: 'image',
       title,
-      src: dataUrl,
+      mediaId,
+      mime: blob.type,
       naturalWidth: dims.w,
       naturalHeight: dims.h,
       x,
@@ -774,9 +865,11 @@ export class NodesManager {
     // Os controles nativos não podem iniciar o arraste do card
     video.addEventListener('mousedown', (e) => e.stopPropagation());
 
-    this.app.storage.media.urlFor(nodeData.mediaId).then((url) => {
-      if (url) {
-        video.src = url;
+    this.app.storage.media.getBlob(nodeData.mediaId).then((blob) => {
+      if (!el.isConnected) return;
+      if (blob) {
+        video.ownedUrl = URL.createObjectURL(blob);
+        video.src = video.ownedUrl;
       } else {
         name.textContent = '🎬 ' + (nodeData.title || 'Vídeo') + ' (arquivo não encontrado)';
         el.classList.add('video-missing');
@@ -787,13 +880,21 @@ export class NodesManager {
   async createVideoNodeFromBlob(blob, title = 'Vídeo', x = 200, y = 200, { select = true, undo = true, mediaId = null } = {}) {
     this.app.setStatus(`Carregando vídeo "${title}"...`);
     const id = await this.app.storage.media.put(blob, mediaId || undefined);
-    const url = await this.app.storage.media.urlFor(id);
+    this.app.storage.media.release(id);
+    const url = URL.createObjectURL(blob);
     const dims = await new Promise((resolve) => {
       const v = document.createElement('video');
       v.preload = 'metadata';
       v.muted = true;
-      v.onloadedmetadata = () => resolve({ w: v.videoWidth || 640, h: v.videoHeight || 360, ok: true });
-      v.onerror = () => resolve({ w: 640, h: 360, ok: false });
+      const finish = (result) => {
+        clearTimeout(timer);
+        v.removeAttribute('src'); v.load();
+        URL.revokeObjectURL(url);
+        resolve(result);
+      };
+      const timer = setTimeout(() => finish({ w: 640, h: 360, ok: false }), 10000);
+      v.onloadedmetadata = () => finish({ w: v.videoWidth || 640, h: v.videoHeight || 360, ok: true });
+      v.onerror = () => finish({ w: 640, h: 360, ok: false });
       v.src = url;
     });
     const maxSide = 480;
@@ -824,15 +925,21 @@ export class NodesManager {
   }
 
   async createAudioNodeFromDataUrl(dataUrl, title = 'Som', x = 250, y = 250, initialMarkers = [], { select = true, undo = true } = {}) {
-    this.app.setStatus(`Processando onda sonora (Waveform) de "${title}"...`);
-    const { peaks, duration } = await this.app.audioEngine.extractPeaksFromDataUrl(dataUrl);
+    const blob = await (await fetch(dataUrl)).blob();
+    return this.createAudioNodeFromBlob(blob, title, x, y, initialMarkers, { select, undo });
+  }
+
+  async createAudioNodeFromBlob(blob, title = 'Som', x = 250, y = 250, initialMarkers = [], { select = true, undo = true } = {}) {
+    const mediaId = await this.app.storage.media.put(blob, undefined, { required: true });
+    this.app.storage.media.release(mediaId);
 
     const node = this.createNode({
       type: 'audio',
       title,
-      src: dataUrl,
-      peaks,
-      duration,
+      mediaId,
+      mime: blob.type,
+      peaks: [],
+      duration: 0,
       markers: initialMarkers,
       x,
       y,
@@ -840,7 +947,7 @@ export class NodesManager {
       height: 165
     }, undo);
     if (select) this.selectNode(node.id, false);
-    this.app.setStatus(`Áudio "${title}" pronto! Clique em "+ Pin" para marcar pontos no som e conectar setas.`);
+    this.app.setStatus(`Áudio "${title}" adicionado. A onda sonora será preparada ao reproduzir.`);
     return node;
   }
 
@@ -925,7 +1032,13 @@ export class NodesManager {
     this.app.state.nodes.delete(id);
     this.selectedIds.delete(id);
     const el = this.nodesLayer.querySelector(`.canvas-node[data-id="${id}"]`);
-    if (el) el.remove();
+    if (el) {
+      this.previews.release(el.querySelector('img'));
+      const video = el.querySelector('video');
+      if (video) { video.pause(); video.removeAttribute('src'); video.load(); if (video.ownedUrl) URL.revokeObjectURL(video.ownedUrl); }
+      el.remove();
+    }
+    this.mounted.delete(id);
     // Remove conexões ligadas a este nó
     for (const [cid, conn] of this.app.state.connections.entries()) {
       if (conn.from === id || conn.to === id) this.app.state.connections.delete(cid);

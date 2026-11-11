@@ -173,6 +173,17 @@ export function buildDiskPlan(data, { getMediaBlob = null } = {}) {
       const src = n.src;
       sig = signature(src);
       getContent = () => dataUrlToBlob(src);
+    } else if ((n.type === 'audio' || n.type === 'image') && n.mediaId && getMediaBlob) {
+      const fromTitle = splitExt(n.title || '');
+      ext = MIME_EXT[(n.mime || '').toLowerCase()] || ((n.type === 'image' ? IMAGE_EXT : AUDIO_EXT).includes(fromTitle.ext) ? fromTitle.ext : n.type === 'image' ? 'png' : 'wav');
+      base = sanitizeName(fromTitle.ext ? fromTitle.base : n.title, 'som');
+      sig = 'media:' + n.mediaId;
+      const mid = n.mediaId;
+      getContent = async () => {
+        const blob = await getMediaBlob(mid);
+        if (!blob) throw new Error(`arquivo original "${n.title}" não está mais no navegador`);
+        return blob;
+      };
     } else if (n.type === 'image' || n.type === 'audio') {
       // Mídia por URL da web: não gera arquivo (a URL fica no project.mirogrs.json)
       kind = 'none';
@@ -202,9 +213,10 @@ export function buildDiskPlan(data, { getMediaBlob = null } = {}) {
       ext = 'md';
       const firstLine = textOfNode(n).split('\n').find((l) => l.trim()) || '';
       const prefix = n.type === 'sticky' ? 'postit' : n.type === 'text' ? 'texto' : n.type === 'swatch' ? 'cor' : 'forma';
+      const folderName = n.folderId && byId.has(n.folderId) ? byId.get(n.folderId).name : 'Sem categoria';
       base = n.title && String(n.title).trim()
         ? sanitizeName(n.title, prefix)
-        : sanitizeName(firstLine.slice(0, 40) ? `${prefix} - ${firstLine.slice(0, 40)}` : prefix, prefix);
+        : sanitizeName(`${folderName} - ${prefix}`, prefix);
       const text = textOfNode(n);
       sig = signature(text) + ':' + text.length;
       getContent = () => text;
@@ -749,8 +761,11 @@ export class ProjectFS {
       try {
         const file = await fh.getFile();
         if (n.type === 'image' || n.type === 'audio') {
-          n.src = await fileToDataUrl(file);
-          loadedSigs.push([n.file, signature(n.src)]);
+          n.mediaId = await this.app.storage.media.put(file, undefined, { required: true });
+          this.app.storage.media.release(n.mediaId);
+          n.mime = file.type || EXT_MIME[splitExt(file.name).ext] || '';
+          n.src = '';
+          loadedSigs.push([n.file, 'media:' + n.mediaId]);
         } else if (n.type === 'video') {
           // Vídeo lido do disco vai para o MediaStore (binário, sem base64)
           const typed = file.type ? file : new File([file], file.name, { type: VIDEO_EXT_MIME[splitExt(file.name).ext] || 'video/mp4' });
@@ -849,6 +864,11 @@ export class ProjectFS {
       } else if (f.isMd) {
         const text = await file.text();
         node = nm.createNode({ type: 'sticky', x: 0, y: 0, width: 220, height: 190, fill: '#fef08a', text }, false);
+      } else if (f.isImg || f.isAud) {
+        const typed = file.type ? file : new File([file], file.name, { type: EXT_MIME[f.ext] || '' });
+        node = f.isImg
+          ? await nm.createImageNodeFromBlob(typed, file.name, 0, 0, { select: false, undo: false })
+          : await nm.createAudioNodeFromBlob(typed, file.name, 0, 0, [], { select: false, undo: false });
       } else {
         const dataUrl = await fileToDataUrl(file.type ? file : new File([file], file.name, { type: EXT_MIME[f.ext] || '' }));
         node = f.isImg

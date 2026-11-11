@@ -176,6 +176,8 @@ export class ConnectionsAndDrawing {
 
   renderAllConnections() {
     this.connectionsGroup.innerHTML = '';
+    this.connectionElements = new Map();
+    this.connectionsByNode = new Map();
 
     for (const conn of this.app.state.connections.values()) {
       const pts = this.getConnectionEndpoints(conn);
@@ -262,7 +264,37 @@ export class ConnectionsAndDrawing {
       });
 
       this.connectionsGroup.appendChild(g);
+      this.connectionElements.set(conn.id, g);
+      for (const id of [conn.from, conn.to]) {
+        if (!this.connectionsByNode.has(id)) this.connectionsByNode.set(id, new Set());
+        this.connectionsByNode.get(id).add(conn.id);
+      }
     }
+  }
+
+  scheduleNodeConnections(nodes) {
+    this.dirtyNodes ||= new Set();
+    for (const n of nodes) this.dirtyNodes.add(n.id);
+    if (this.connectionFrame) return;
+    this.connectionFrame = requestAnimationFrame(() => {
+      this.connectionFrame = null;
+      const ids = new Set();
+      for (const id of this.dirtyNodes) for (const cid of this.connectionsByNode?.get(id) || []) ids.add(cid);
+      this.dirtyNodes.clear();
+      for (const id of ids) {
+        const conn = this.app.state.connections.get(id);
+        const g = this.connectionElements?.get(id);
+        const p = conn && this.getConnectionEndpoints(conn);
+        if (!g || !p) continue;
+        const d = `M ${p.x1 + SVG_OFFSET} ${p.y1 + SVG_OFFSET} C ${p.cx1 + SVG_OFFSET} ${p.cy1 + SVG_OFFSET}, ${p.cx2 + SVG_OFFSET} ${p.cy2 + SVG_OFFSET}, ${p.x2 + SVG_OFFSET} ${p.y2 + SVG_OFFSET}`;
+        for (const path of g.querySelectorAll('path')) path.setAttribute('d', d);
+        const x = (p.x1 + 3 * p.cx1 + 3 * p.cx2 + p.x2) / 8 + SVG_OFFSET;
+        const y = (p.y1 + 3 * p.cy1 + 3 * p.cy2 + p.y2) / 8 + SVG_OFFSET;
+        const text = g.querySelector('text'), rect = g.querySelector('rect');
+        if (text) { text.setAttribute('x', x); text.setAttribute('y', y); }
+        if (rect) { rect.setAttribute('x', x - Number(rect.getAttribute('width')) / 2); rect.setAttribute('y', y - 11); }
+      }
+    });
   }
 
   // DESENHO LIVRE (CANETA / MARCA-TEXTO) E BORRACHA

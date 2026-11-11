@@ -2207,3 +2207,6 @@ body.focus-mode #textblocks-layer {
 .node-video.video-missing .video-el {
   opacity: 0.25;
 }
+
+/* Offscreen Project rows retain their scroll geometry without text layout. */
+.pp-row { content-visibility: auto; contain-intrinsic-size: auto 28px; }

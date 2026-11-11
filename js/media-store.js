@@ -16,12 +16,18 @@ export class MediaStore {
     return 'med_' + Date.now().toString(36) + '_' + Math.floor(Math.random() * 1e8).toString(36);
   }
 
-  async put(blob, id = this.newId()) {
-    this.remember(id, blob);
+  async put(blob, id = this.newId(), { required = false } = {}) {
     try {
       await this.storage.tx(MEDIA_STORE, 'readwrite', (st) => st.put({ id, blob, type: blob.type, size: blob.size }));
     } catch (err) {
       console.warn('Não foi possível guardar o vídeo no navegador (cota cheia?)', err);
+      if (required) {
+        const entry = this.cache.get(id);
+        if (entry) URL.revokeObjectURL(entry.url);
+        this.cache.delete(id);
+        throw err;
+      }
+      this.remember(id, blob);
     }
     return id;
   }
@@ -35,6 +41,12 @@ export class MediaStore {
     return url;
   }
 
+  release(id) {
+    const entry = this.cache.get(id);
+    if (entry) URL.revokeObjectURL(entry.url);
+    this.cache.delete(id);
+  }
+
   async getBlob(id) {
     if (!id) return null;
     const hit = this.cache.get(id);
@@ -42,7 +54,6 @@ export class MediaStore {
     try {
       const rec = await this.storage.tx(MEDIA_STORE, 'readonly', (st) => st.get(id));
       if (rec?.blob) {
-        this.remember(id, rec.blob);
         return rec.blob;
       }
     } catch {}
@@ -51,7 +62,7 @@ export class MediaStore {
 
   async urlFor(id) {
     const blob = await this.getBlob(id);
-    return blob ? this.cache.get(id).url : null;
+    return blob ? this.remember(id, blob) : null;
   }
 
   // Apaga do navegador os vídeos que nenhum projeto usa mais
@@ -61,6 +72,10 @@ export class MediaStore {
       const used = new Set();
       for (const b of boards) for (const n of b.nodes || []) if (n.mediaId) used.add(n.mediaId);
       for (const n of this.storage.app.state.nodes.values()) if (n.mediaId) used.add(n.mediaId);
+      // Deleted media can still be restored by Undo/Redo.
+      for (const snapshot of [...(this.storage.app.undoStack || []), ...(this.storage.app.redoStack || [])]) {
+        for (const n of snapshot.nodes || []) if (n.mediaId) used.add(n.mediaId);
+      }
       const keys = (await this.storage.tx(MEDIA_STORE, 'readonly', (st) => st.getAllKeys())) || [];
       for (const k of keys) {
         if (!used.has(k)) await this.storage.tx(MEDIA_STORE, 'readwrite', (st) => st.delete(k));
